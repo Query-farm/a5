@@ -19,3 +19,4 @@ jobs:
       duckdb_version: v1.4-andium
       ci_tools_version: main
       extension_name: a5
+      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads;"
