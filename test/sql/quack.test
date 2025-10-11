@@ -1,23 +1,23 @@
-# name: test/sql/quack.test
-# description: test quack extension
+# name: test/sql/a5geo.test
+# description: test a5geo extension
 # group: [sql]
 
 # Before we load the extension, this will fail
 statement error
-SELECT quack('Sam');
+SELECT a5geo('Sam');
 ----
-Catalog Error: Scalar Function with name quack does not exist!
+Catalog Error: Scalar Function with name a5geo does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
-require quack
+require a5geo
 
 # Confirm the extension works
 query I
-SELECT quack('Sam');
+SELECT a5geo('Sam');
 ----
-Quack Sam 🐥
+A5geo Sam 🐥
 
 query I
-SELECT quack_openssl_version('Michael') ILIKE 'Quack Michael, my linked OpenSSL version is OpenSSL%';
+SELECT a5geo_openssl_version('Michael') ILIKE 'A5geo Michael, my linked OpenSSL version is OpenSSL%';
 ----
 true
