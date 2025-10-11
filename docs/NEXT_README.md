@@ -1,10 +1,10 @@
-# A5geo
+# A5
 
 This repository is based on https://github.com/duckdb/extension-template, check it out if you want to build and ship your own DuckDB extension.
 
 ---
 
-This extension, A5geo, allow you to ... <extension_goal>.
+This extension, A5, allow you to ... <extension_goal>.
 
 
 ## Building
@@ -26,23 +26,23 @@ The main binaries that will be built are:
 ```sh
 ./build/release/duckdb
 ./build/release/test/unittest
-./build/release/extension/a5geo/a5geo.duckdb_extension
+./build/release/extension/a5/a5.duckdb_extension
 ```
 - `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `a5geo.duckdb_extension` is the loadable binary as it would be distributed.
+- `a5.duckdb_extension` is the loadable binary as it would be distributed.
 
 ## Running the extension
 To run the extension code, simply start the shell with `./build/release/duckdb`.
 
-Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `a5geo()` that takes a string arguments and returns a string:
+Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `a5()` that takes a string arguments and returns a string:
 ```
-D select a5geo('Jane') as result;
+D select a5('Jane') as result;
 ┌───────────────┐
 │    result     │
 │    varchar    │
 ├───────────────┤
-│ A5geo Jane 🐥 │
+│ A5 Jane 🐥 │
 └───────────────┘
 ```
 
@@ -81,6 +81,6 @@ DuckDB. To specify a specific version, you can pass the version instead.
 
 After running these steps, you can install and load your extension using the regular INSTALL/LOAD commands in DuckDB:
 ```sql
-INSTALL a5geo
-LOAD a5geo
+INSTALL a5
+LOAD a5
 ```

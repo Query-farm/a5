@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-class A5geoExtension : public Extension {
+class A5Extension : public Extension {
 public:
 	void Load(ExtensionLoader &db) override;
 	std::string Name() override;

@@ -1,23 +1,23 @@
-# name: test/sql/a5geo.test
-# description: test a5geo extension
+# name: test/sql/a5.test
+# description: test a5 extension
 # group: [sql]
 
 # Before we load the extension, this will fail
 statement error
-SELECT a5geo('Sam');
+SELECT a5('Sam');
 ----
-Catalog Error: Scalar Function with name a5geo does not exist!
+Catalog Error: Scalar Function with name a5 does not exist!
 
 # Require statement will ensure this test is run with this extension loaded
-require a5geo
+require a5
 
 # Confirm the extension works
 query I
-SELECT a5geo('Sam');
+SELECT a5('Sam');
 ----
-A5geo Sam 🐥
+A5 Sam 🐥
 
 query I
-SELECT a5geo_openssl_version('Michael') ILIKE 'A5geo Michael, my linked OpenSSL version is OpenSSL%';
+SELECT a5_openssl_version('Michael') ILIKE 'A5 Michael, my linked OpenSSL version is OpenSSL%';
 ----
 true
