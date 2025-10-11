@@ -107,6 +107,47 @@ inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &r
 	}
 }
 
+inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_vector = args.data[0];
+	auto &max_resolution_vector = args.data[1];
+
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
+	    cell_vector, max_resolution_vector, result, args.size(), [&](uint64_t cell_id, int32_t child_resolution) {
+		    auto child_result = a5_cell_to_children(cell_id, child_resolution);
+
+		    if (child_result.error) {
+			    throw InvalidInputException(child_result.error);
+		    }
+
+		    if (child_result.len == 0) {
+			    return list_entry_t {0, 0};
+		    }
+		    for (auto i = 0; i < child_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
+		    }
+		    list_entry_t out {offset, child_result.len};
+		    offset += child_result.len;
+		    a5_free_cell_array(child_result);
+		    return out;
+	    });
+}
+
+inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cells = a5_get_res0_cells();
+	vector<Value> cell_vec;
+	for (auto i = 0; i < cells.len; i++) {
+		cell_vec.emplace_back(Value::UBIGINT(cells.data[i]));
+	}
+	a5_free_cell_array(cells);
+	Value val = Value::LIST(LogicalType::UBIGINT, cell_vec);
+
+	D_ASSERT(args.ColumnCount() == 0);
+	result.Reference(val);
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 
 	auto a5_cell_area_func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
@@ -132,6 +173,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto a5_cell_to_lon_lat_func = ScalarFunction("a5_cell_to_lon_lat", {LogicalType::UBIGINT},
 	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
 	loader.RegisterFunction(a5_cell_to_lon_lat_func);
+
+	auto a5_cell_to_children_func = ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
+	                                               LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun);
+	loader.RegisterFunction(a5_cell_to_children_func);
+
+	auto a5_get_res0_cells_func =
+	    ScalarFunction("a5_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
+	loader.RegisterFunction(a5_get_res0_cells_func);
 }
 
 void A5Extension::Load(ExtensionLoader &loader) {
