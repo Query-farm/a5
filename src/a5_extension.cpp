@@ -6,6 +6,7 @@
 #include "duckdb/function/scalar_function.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "rust.h"
+#include "query_farm_telemetry.hpp"
 namespace duckdb {
 
 #define MAX_RESOLUTION 30
@@ -150,7 +151,7 @@ inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &r
 
 static void LoadInternal(ExtensionLoader &loader) {
 
-	auto a5_cell_area_func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
+	auto a5_cell_area_func = ScalarFunction("a5_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
 	loader.RegisterFunction(a5_cell_area_func);
 
 	auto a5_get_num_cells_func =
@@ -162,25 +163,27 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(a5_get_resolution_func);
 
 	auto a5_lon_lat_to_cell_func =
-	    ScalarFunction("a5_lon_lat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
+	    ScalarFunction("a5_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
 	                   LogicalType::UBIGINT, A5LonLatToCellFun);
 	loader.RegisterFunction(a5_lon_lat_to_cell_func);
 
-	auto a5_cell_to_parent_func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
+	auto a5_cell_to_parent_func = ScalarFunction("a5_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
 	                                             LogicalType::UBIGINT, A5CellToParentFun);
 	loader.RegisterFunction(a5_cell_to_parent_func);
 
-	auto a5_cell_to_lon_lat_func = ScalarFunction("a5_cell_to_lon_lat", {LogicalType::UBIGINT},
+	auto a5_cell_to_lon_lat_func = ScalarFunction("a5_lon_lat", {LogicalType::UBIGINT},
 	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
 	loader.RegisterFunction(a5_cell_to_lon_lat_func);
 
-	auto a5_cell_to_children_func = ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
+	auto a5_cell_to_children_func = ScalarFunction("a5_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
 	                                               LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun);
 	loader.RegisterFunction(a5_cell_to_children_func);
 
 	auto a5_get_res0_cells_func =
 	    ScalarFunction("a5_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
 	loader.RegisterFunction(a5_get_res0_cells_func);
+
+	QueryFarmSendTelemetry(loader, "a5", "2025101101");
 }
 
 void A5Extension::Load(ExtensionLoader &loader) {

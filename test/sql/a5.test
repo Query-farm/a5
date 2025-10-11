@@ -12,12 +12,7 @@ Catalog Error: Scalar Function with name a5 does not exist!
 require a5
 
 query R
-select a5_cell_area(4)
-----
-132829589786.31229
-
-query R
-select round(a5_cell_area(columns(*)::integer)) from range(31)
+select round(a5_area(columns(*)::integer)) from range(31)
 ----
 42505468731620.0
 8501093746324.0
@@ -88,7 +83,7 @@ select a5_num_cells(columns(*)::integer) from range(31)
 
 # FIXME: should test resolutinos up to 30, not just 29
 query I
-select a5_resolution(a5_lon_lat_to_cell(55, 44, columns(*)::integer)) from range(30);
+select a5_resolution(a5_cell(55, 44, columns(*)::integer)) from range(30);
 ----
 0
 1
@@ -123,7 +118,7 @@ select a5_resolution(a5_lon_lat_to_cell(55, 44, columns(*)::integer)) from range
 
 
 query I
-select a5_lon_lat_to_cell(55, 44, columns(*)::integer) from range(30);
+select a5_cell(55, 44, columns(*)::integer) from range(30);
 ----
 1585267068834414592
 7277816997830721536
@@ -158,7 +153,7 @@ select a5_lon_lat_to_cell(55, 44, columns(*)::integer) from range(30);
 
 
 query I
-select a5_cell_to_parent(a5_lon_lat_to_cell(55, 44, columns(*)::integer), columns(*)::integer-1) from range(1, 30);
+select a5_parent(a5_cell(55, 44, columns(*)::integer), columns(*)::integer-1) from range(1, 30);
 ----
 1585267068834414592
 7277816997830721536
@@ -191,7 +186,7 @@ select a5_cell_to_parent(a5_lon_lat_to_cell(55, 44, columns(*)::integer), column
 7375724903507325336
 
 query I
-select list_transform(a5_cell_to_lon_lat(a5_lon_lat_to_cell(55, 44, columns(*)::integer)), x -> round(x)) from range(1, 30);
+select list_transform(a5_lon_lat(a5_cell(55, 44, columns(*)::integer)), x -> round(x)) from range(1, 30);
 ----
 [51.0, 48.0]
 [57.0, 48.0]
@@ -230,7 +225,7 @@ select a5_res0_cells()
 
 
 query I
-select a5_cell_to_children(a5_lon_lat_to_cell(55, 44, columns(*)::integer), columns(*)::integer+1)  from range(0, 29);
+select a5_children(a5_cell(55, 44, columns(*)::integer), columns(*)::integer+1)  from range(0, 29);
 ----
 [7566047373982433280, 7854277750134145024, 8142508126285856768, 8430738502437568512, 7277816997830721536]
 [7241788200811757568, 7313845794849685504, 7385903388887613440, 7457960982925541376]
