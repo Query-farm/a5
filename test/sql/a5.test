@@ -11,7 +11,7 @@ Catalog Error: Scalar Function with name a5 does not exist!
 # Require statement will ensure this test is run with this extension loaded
 require a5
 
--- Test getting the area of a A5 cell.
+# Test getting the area of a A5 cell.
 query R
 select round(a5_area(columns(*)::integer)) from range(31)
 ----
@@ -47,8 +47,8 @@ select round(a5_area(columns(*)::integer)) from range(31)
 0.0
 0.0
 
--- Get the number of cells at each resolution level, there are
--- 30 different resolution levels
+# Get the number of cells at each resolution level, there are
+# 30 different resolution levels
 query I
 select a5_num_cells(columns(*)::integer) from range(31)
 ----
@@ -84,7 +84,7 @@ select a5_num_cells(columns(*)::integer) from range(31)
 4323455642275676000
 17293822569102705000
 
--- Get the resolution from a cell.
+# Get the resolution from a cell.
 query I
 select a5_resolution(a5_cell(55, 44, columns(*)::integer)) from range(30);
 ----
@@ -119,7 +119,7 @@ select a5_resolution(a5_cell(55, 44, columns(*)::integer)) from range(30);
 28
 29
 
--- Get the cell for a longitude, latitude pair.
+# Get the cell for a longitude, latitude pair.
 query I
 select a5_cell(55, 44, columns(*)::integer) from range(30);
 ----
@@ -155,7 +155,7 @@ select a5_cell(55, 44, columns(*)::integer) from range(30);
 7375724903507325338
 
 
--- Get the parent cell from a A5 cell.
+# Get the parent cell from a A5 cell.
 query I
 select a5_parent(a5_cell(55, 44, columns(*)::integer), columns(*)::integer-1) from range(1, 30);
 ----
@@ -189,7 +189,7 @@ select a5_parent(a5_cell(55, 44, columns(*)::integer), columns(*)::integer-1) fr
 7375724903507325344
 7375724903507325336
 
--- a5_lon_lat get the center of the A5 cell.
+# a5_lon_lat get the center of the A5 cell.
 query I
 select list_transform(a5_lon_lat(a5_cell(55, 44, columns(*)::integer)), x -> round(x)) from range(1, 30);
 ----
@@ -223,13 +223,13 @@ select list_transform(a5_lon_lat(a5_cell(55, 44, columns(*)::integer)), x -> rou
 [55.0, 44.0]
 [55.0, 44.0]
 
--- Get the list of top level A5 cells at resolution 0
+# Get the list of top level A5 cells at resolution 0
 query I
 select a5_res0_cells()
 ----
 [144115188075855872, 432345564227567616, 720575940379279360, 1008806316530991104, 1297036692682702848, 1585267068834414592, 1873497444986126336, 2161727821137838080, 2449958197289549824, 2738188573441261568, 3026418949592973312, 3314649325744685056]
 
--- Get the child cells of any A5 cell.
+# Get the child cells of any A5 cell.
 query I
 select a5_children(a5_cell(55, 44, columns(*)::integer), columns(*)::integer+1)  from range(0, 29);
 ----
@@ -264,7 +264,7 @@ select a5_children(a5_cell(55, 44, columns(*)::integer), columns(*)::integer+1) 
 [7375724903507325330, 7375724903507325334, 7375724903507325338, 7375724903507325342]
 
 
--- Get the coordinates of the boundary of any A5 cell with at_boundary
+# Get the coordinates of the boundary of any A5 cell with at_boundary
 query I
 select list_transform(a5_boundary(a5_cell(55, 44, columns(*)::integer)), x -> list_transform(x, y-> round(y, 3))) from range(1, 30);
 ----
