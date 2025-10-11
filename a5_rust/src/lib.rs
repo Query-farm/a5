@@ -90,9 +90,10 @@ pub fn vec_result_to_c(result: Result<Vec<a5::LonLat>, String>) -> LonLatDegrees
     match result {
         Ok(vec) => {
             let degree_vec: Vec<LonLatDegrees> = vec.into_iter().map(|ll| LonLatDegrees { lon: ll.longitude.get(), lat: ll.latitude.get() }).collect();
+            let len = degree_vec.len();
+
             let mut boxed_slice = degree_vec.into_boxed_slice(); // heap allocation
             let data_ptr = boxed_slice.as_mut_ptr();
-            let len = boxed_slice.len();
             std::mem::forget(boxed_slice); // prevent Rust from freeing it
             LonLatDegreesArray { data: data_ptr, len, error: std::ptr::null_mut() }
         }

@@ -136,6 +136,36 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 	    });
 }
 
+inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_vector = args.data[0];
+
+	ListVector::Reserve(result, args.size() * 5);
+	uint64_t offset = 0;
+
+	UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
+		auto boundary_result = a5_cell_to_boundary(cell_id);
+
+		if (boundary_result.error) {
+			throw InvalidInputException(boundary_result.error);
+		}
+
+		if (boundary_result.len == 0) {
+			return list_entry_t {0, 0};
+		}
+		for (auto i = 0; i < boundary_result.len; i++) {
+			auto coord = boundary_result.data[i];
+			vector<Value> coord_vec;
+			coord_vec.emplace_back(Value::DOUBLE(coord.lon));
+			coord_vec.emplace_back(Value::DOUBLE(coord.lat));
+			ListVector::PushBack(result, Value::ARRAY(LogicalType::DOUBLE, coord_vec));
+		}
+		list_entry_t out {offset, boundary_result.len};
+		offset += boundary_result.len;
+		a5_free_lonlatdegrees_array(boundary_result);
+		return out;
+	});
+}
+
 inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cells = a5_get_res0_cells();
 	vector<Value> cell_vec;
@@ -182,6 +212,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto a5_get_res0_cells_func =
 	    ScalarFunction("a5_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
 	loader.RegisterFunction(a5_get_res0_cells_func);
+
+	auto a5_cell_to_boundary_func =
+	    ScalarFunction("a5_boundary", {LogicalType::UBIGINT},
+	                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun);
+	loader.RegisterFunction(a5_cell_to_boundary_func);
 
 	QueryFarmSendTelemetry(loader, "a5", "2025101101");
 }
