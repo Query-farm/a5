@@ -1,146 +1,237 @@
-# DuckDB Extension Template
-This repository contains a template for creating a DuckDB extension. The main goal of this template is to allow users to easily develop, test and distribute their own DuckDB extension. The main branch of the template is always based on the latest stable DuckDB allowing you to try out your extension right away.
+# A5 Geospatial Extension for DuckDB
 
-## Getting started
-First step to getting started is to create your own repo from this template by clicking `Use this template`. Then clone your new repository using
-```sh
-git clone --recurse-submodules https://github.com/<you>/<your-new-extension-repo>.git
-```
-Note that `--recurse-submodules` will ensure DuckDB is pulled which is required to build the extension.
+A high-performance DuckDB extension that provides functions for the [A5](https://a5geo.org) global geospatial index - a millimeter-accurate, equal-area indexing system for geospatial data.
 
-## Building
-### Managing dependencies
-DuckDB extensions uses VCPKG for dependency management. Enabling VCPKG is very simple: follow the [installation instructions](https://vcpkg.io/en/getting-started) or just run the following:
-```shell
-cd <your-working-dir-not-the-plugin-repo>
-git clone https://github.com/Microsoft/vcpkg.git
-sh ./vcpkg/scripts/bootstrap.sh -disableMetrics
-export VCPKG_TOOLCHAIN_PATH=`pwd`/vcpkg/scripts/buildsystems/vcpkg.cmake
-```
-Note: VCPKG is only required for extensions that want to rely on it for dependency management. If you want to develop an extension without dependencies, or want to do your own dependency management, just skip this step. Note that the example extension uses VCPKG to build with a dependency for instructive purposes, so when skipping this step the build may not work without removing the dependency.
+## ✨ What is A5?
 
-### Build steps
-Now to build the extension, run:
-```sh
-make
-```
-The main binaries that will be built are:
-```sh
-./build/release/duckdb
-./build/release/test/unittest
-./build/release/extension/<extension_name>/<extension_name>.duckdb_extension
-```
-- `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
-- `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `<extension_name>.duckdb_extension` is the loadable binary as it would be distributed.
+A5 is an innovative geospatial index that partitions the world into [pentagonal cells](https://a5geo.org/examples/teohedron-dodecahedron) based on a geodesic grid. Key features include:
 
-### Tips for speedy builds
-DuckDB extensions currently rely on DuckDB's build system to provide easy testing and distributing. This does however come at the downside of requiring the template to build DuckDB and its unittest binary every time you build your extension. To mitigate this, we highly recommend installing [ccache](https://ccache.dev/) and [ninja](https://ninja-build.org/). This will ensure you only need to build core DuckDB once and allows for rapid rebuilds.
+- 🌍 **Global Coverage**: Seamless indexing from global to millimeter scales
+- 📐 **Equal Area**: All cells at the same resolution level have identical area ([OGC compliant](https://docs.ogc.org/as/20-040r3/20-040r3.html#toc29))
+- 🔍 **31 Resolution Levels**: From world-spanning cells to sub-30mm² precision
+- ⚡ **Fast Spatial Operations**: Optimized for aggregation, filtering, and spatial joins
 
-To build using ninja and ccache ensure both are installed and run:
+## 🎯 Use Cases
 
-```sh
-GEN=ninja make
+### Spatial Data Aggregation
+Group point data spatially to understand distributions:
+```sql
+-- Analyze restaurant density by A5 cells
+SELECT a5_cell(latitude, longitude, 15) as cell_id, COUNT(*) as restaurant_count
+FROM restaurants
+GROUP BY cell_id
+ORDER BY restaurant_count DESC;
 ```
 
-## Running the extension
-To run the extension code, simply start the shell with `./build/release/duckdb`. This shell will have the extension pre-loaded.
-
-Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `a5()` that takes a string arguments and returns a string:
-```
-D select a5('Jane') as result;
-┌───────────────┐
-│    result     │
-│    varchar    │
-├───────────────┤
-│ A5 Jane 🐥 │
-└───────────────┘
-```
-
-## Running the tests
-Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
-```sh
-make test
+### Multi-Variable Spatial Analysis
+Correlate different datasets using common cell boundaries:
+```sql
+-- Compare elevation vs crop yield by region
+SELECT
+    cells.cell_id,
+    AVG(elevation.height) as avg_elevation,
+    AVG(crops.yield) as avg_yield
+FROM (SELECT DISTINCT a5_cell(lat, lon, 12) as cell_id FROM locations) cells
+JOIN elevation ON elevation.cell = cells.cell_id
+JOIN crops ON crops.cell = cells.cell_id
+GROUP BY cells.cell_id;
 ```
 
-## Getting started with your own extension
-After creating a repository from this template, the first step is to name your extension. To rename the extension, run:
-```
-python3 ./scripts/bootstrap-template.py <extension_name_you_want>
-```
-Feel free to delete the script after this step.
-
-Now you're good to go! After a (re)build, you should now be able to use your duckdb extension:
-```
-./build/release/duckdb
-D select <extension_name_you_chose>('Jane') as result;
-┌─────────────────────────────────────┐
-│                result               │
-│               varchar               │
-├─────────────────────────────────────┤
-│ <extension_name_you_chose> Jane 🐥  │
-└─────────────────────────────────────┘
+### Hierarchical Spatial Queries
+Navigate between resolution levels for multi-scale analysis:
+```sql
+-- Find high-resolution hotspots within broader regions
+SELECT
+    a5_parent(detailed_cell, 10) as region,
+    detailed_cell,
+    COUNT(*) as point_count
+FROM (
+    SELECT a5_cell(lat, lon, 15) as detailed_cell
+    FROM points
+)
+GROUP BY region, detailed_cell
+HAVING point_count > 100;
 ```
 
-For inspiration/examples on how to extend DuckDB in a more meaningful way, check out the [test extensions](https://github.com/duckdb/duckdb/blob/main/test/extension),
-the [in-tree extensions](https://github.com/duckdb/duckdb/tree/main/extension), and the [out-of-tree extensions](https://github.com/duckdblabs).
+## 🚀 Quick Start
 
-## Distributing your extension
-To distribute your extension binaries, there are a few options.
+### Installation
 
-### Community extensions
-The recommended way of distributing extensions is through the [community extensions repository](https://github.com/duckdb/community-extensions).
-This repository is designed specifically for extensions that are built using this extension template, meaning that as long as your extension can be
-built using the default CI in this template, submitting it to the community extensions is a very simple process. The process works similarly to popular
-package managers like homebrew and vcpkg, where a PR containing a descriptor file is submitted to the package manager repository. After the CI in the
-community extensions repository completes, the extension can be installed and loaded in DuckDB with:
-```SQL
-INSTALL <my_extension> FROM community;
-LOAD <my_extension>
-```
-For more information, see the [community extensions documentation](https://duckdb.org/community_extensions/documentation).
+The `a5` extension is available as a [DuckDB Community Extension](https://github.com/duckdb/community-extensions):
 
-### Downloading artifacts from GitHub
-The default CI in this template will automatically upload the binaries for every push to the main branch as GitHub Actions artifacts. These
-can be downloaded manually and then loaded directly using:
-```SQL
-LOAD '/path/to/downloaded/extension.duckdb_extension';
-```
-Note that this will require starting DuckDB with the
-`allow_unsigned_extensions` option set to true. How to set this will depend on the client you're using. For the CLI it is done like:
-```shell
-duckdb -unsigned
+```sql
+INSTALL a5 FROM community;
+LOAD a5;
 ```
 
-### Uploading to a custom repository
-If for some reason distributing through community extensions is not an option, extensions can also be uploaded to a custom extension repository.
-This will give some more control over where and how the extensions are distributed, but comes with the downside of requiring the `allow_unsigned_extensions`
-option to be set. For examples of how to configure a manual GitHub Actions deploy pipeline, check out the extension deploy script in https://github.com/duckdb/extension-ci-tools.
-Some examples of extensions that use this CI/CD workflow check out [spatial](https://github.com/duckdblabs/duckdb_spatial) or [aws](https://github.com/duckdb/duckdb_aws).
+### Basic Usage
 
-Extensions in custom repositories can be installed and loaded using:
-```SQL
-INSTALL <my_extension> FROM 'http://my-custom-repo'
-LOAD <my_extension>
+```sql
+-- Get the A5 cell for a specific location (latitude, longitude, resolution)
+SELECT a5_cell(40.7128, -74.0060, 15) as nyc_cell;  -- Times Square
+┌──────────────────────┐
+│       nyc_cell       │
+│        uint64        │
+├──────────────────────┤
+│ 13397512237531267072 │
+└──────────────────────┘
+
+-- Find the area of that cell in square meters
+SELECT a5_area(15) as cell_area_m2;
+┌───────────────────┐
+│   cell_area_m2    │
+│      double       │
+├───────────────────┤
+│ 31669.04205949599 │
+└───────────────────┘
+
+-- Get the center coordinates of a cell
+SELECT a5_lon_lat(a5_cell(40.7128, -74.0060, 15)) as center_coords;
+┌──────────────────────────────────────────┐
+│              center_coords               │
+│                double[2]                 │
+├──────────────────────────────────────────┤
+│ [40.714225512117594, -74.00553999061431] │
+└──────────────────────────────────────────┘
+
+-- Find parent cell at lower resolution
+SELECT a5_parent(a5_cell(40.7128, -74.0060, 15), 10) as parent_cell;
+┌──────────────────────┐
+│     parent_cell      │
+│        uint64        │
+├──────────────────────┤
+│ 13397512350811029504 │
+└──────────────────────┘
+
+-- Get all children cells at higher resolution
+SELECT a5_children(a5_cell(40.7128, -74.0060, 10), 12) as child_cells;
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│                                       child_cells                                        │
+│                                         uint64[]                                         │
+├──────────────────────────────────────────────────────────────────────────────────────────┤
+│ [13397511938494169088, 13397512213372076032, 13397512488249982976, 13397512763127889920] │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Versioning of your extension
-Extension binaries will only work for the specific DuckDB version they were built for. The version of DuckDB that is targeted
-is set to the latest stable release for the main branch of the template so initially that is all you need. As new releases
-of DuckDB are published however, the extension repository will need to be updated. The template comes with a workflow set-up
-that will automatically build the binaries for all DuckDB target architectures that are available in the corresponding DuckDB
-version. This workflow is found in `.github/workflows/MainDistributionPipeline.yml`. It is up to the extension developer to keep
-this up to date with DuckDB. Note also that its possible to distribute binaries for multiple DuckDB versions in this workflow
-by simply duplicating the jobs.
+## 📚 API Reference
 
-## Setting up CLion
+### Core Functions
 
-### Opening project
-Configuring CLion with the extension template requires a little work. Firstly, make sure that the DuckDB submodule is available.
-Then make sure to open `./duckdb/CMakeLists.txt` (so not the top level `CMakeLists.txt` file from this repo) as a project in CLion.
-Now to fix your project path go to `tools->CMake->Change Project Root`([docs](https://www.jetbrains.com/help/clion/change-project-root-directory.html)) to set the project root to the root dir of this repo.
+#### `a5_cell(latitude, longitude, resolution) -> UBIGINT`
 
-### Debugging
-To set up debugging in CLion, there are two simple steps required. Firstly, in `CLion -> Settings / Preferences -> Build, Execution, Deploy -> CMake` you will need to add the desired builds (e.g. Debug, Release, RelDebug, etc). There's different ways to configure this, but the easiest is to leave all empty, except the `build path`, which needs to be set to `../build/{build type}`. Now on a clean repository you will first need to run `make {build type}` to initialize the CMake build directory. After running make, you will be able to (re)build from CLion by using the build target we just created. If you use the CLion editor, you can create a CLion CMake profiles matching the CMake variables that are described in the makefile, and then you don't need to invoke the Makefile.
+Returns the A5 cell ID for given coordinates and resolution level.
 
-The second step is to configure the unittest runner as a run/debug configuration. To do this, go to `Run -> Edit Configurations` and click `+ -> Cmake Application`. The target and executable should be `unittest`. This will run all the DuckDB tests. To specify only running the extension specific tests, add `--test-dir ../../.. [sql]` to the `Program Arguments`. Note that it is recommended to use the `unittest` executable for testing/development within CLion. The actual DuckDB CLI currently does not reliably work as a run target in CLion.
+**Parameters:**
+
+- `latitude` (DOUBLE): Latitude in decimal degrees (-90 to 90)
+- `longitude` (DOUBLE): Longitude in decimal degrees (-180 to 180)
+- `resolution` (INTEGER): Resolution level (0-30, where 0 is coarsest)
+
+**Example:**
+```sql
+SELECT a5_cell(51.5074, -0.1278, 12) as london_cell;  -- 207618739568
+```
+
+#### `a5_area(resolution) -> DOUBLE`
+
+Returns the area of an A5 cell in the specified resolution  in square meters.
+
+**Example:**
+```sql
+SELECT a5_area(5) as area_m2;
+```
+
+#### `a5_resolution(cell_id) -> INTEGER`
+
+Returns the resolution level of an A5 cell.
+
+**Example:**
+```sql
+SELECT a5_resolution(207618739568) as resolution;  -- 12
+```
+
+### Spatial Relationships
+
+#### `a5_parent(cell_id, target_resolution) -> UBIGINT`
+
+Returns the parent cell at a coarser resolution level.
+
+**Example:**
+```sql
+SELECT a5_parent(207618739568, 10) as parent_cell;
+```
+
+#### `a5_children(cell_id, target_resolution) -> UBIGINT[]`
+
+Returns all children cells at a finer resolution level.
+
+**Example:**
+```sql
+SELECT a5_children(207618739568, 14) as child_cells;
+```
+
+### Geometric Properties
+
+#### `a5_lon_lat(cell_id) -> DOUBLE[2]`
+
+Returns the center coordinates [longitude, latitude] of a cell.
+
+**Example:**
+```sql
+SELECT a5_lon_lat(207618739568) as center;  -- [-0.1278, 51.5074]
+```
+
+#### `a5_boundary(cell_id) -> DOUBLE[2][]`
+
+Returns the boundary vertices of a cell as an array of [longitude, latitude] pairs.
+
+**Example:**
+```sql
+SELECT a5_boundary(207618739568) as boundary_points;
+```
+
+### Utility Functions
+
+#### `a5_num_cells(resolution) -> UBIGINT`
+
+Returns the total number of A5 cells at a given resolution level.
+
+**Example:**
+```sql
+SELECT a5_num_cells(15) as total_cells;  -- 16,106,127,360
+```
+
+#### `a5_res0_cells() -> UBIGINT[]`
+
+Returns all 12 base cells at resolution level 0.
+
+**Example:**
+```sql
+SELECT a5_res0_cells() as base_cells;
+```
+
+## 🎯 Resolution Guide
+
+| Resolution | Cell Area (approx) | Use Case |
+|------------|-------------------|----------|
+| 0-5 | 42M km² - 33k km² | Continental/Country analysis |
+| 6-10 | 8k km² - 130 km² | Regional/State analysis |
+| 11-15 | 32 km² - 32 hectares | City/District analysis |
+| 16-20 | 8 hectares - 124 m² | Neighborhood/Building analysis |
+| 21-25 | 31 m² - 0.5 m² | Room/Vehicle analysis |
+| 26-30 | 8 cm² - 0.03 mm² | Precision measurements |
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+
+## 🙏 Credits
+
+- **A5 Algorithm**: This extension utilizes the [`a5`](https://crates.io/crates/a5) Rust crate created by [felixpalmer](https://github.com/felixpalmer)
+- **A5 Specification**: Based on the [A5 geospatial index specification](https://a5geo.org)
+- **DuckDB Community**: Built on the excellent [DuckDB](https://duckdb.org) database system
+
+## 🔗 Related Links
+
+- [A5 Official Website](https://a5geo.org)
+- [A5 Examples and Visualizations](https://a5geo.org/examples/)
