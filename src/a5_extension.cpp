@@ -143,6 +143,11 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 	uint64_t offset = 0;
 
 	UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
+		if (cell_id == 0) {
+			// A5 defines cell 0 as invalid / non-existent, so return an empty boundary
+			return list_entry_t {0, 0};
+		}
+
 		auto boundary_result = a5_cell_to_boundary(cell_id);
 
 		if (boundary_result.error) {
