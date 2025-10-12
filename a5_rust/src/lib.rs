@@ -157,7 +157,7 @@ pub extern "C" fn a5_cell_to_boundary(cell_id: u64) -> LonLatDegreesArray {
 #[unsafe(no_mangle)]
 pub extern "C" fn a5_cell_to_children(index: u64, child_resolution: i32) -> CellArray {
     match child_resolution {
-        r if r < 0 || r > 29 => {
+        r if r >= 0 && r < 31 => {
             cell_vec_result_to_c(a5::cell_to_children(index, Some(child_resolution)))
         }
         _ => cell_vec_result_to_c(a5::cell_to_children(index, None)),
