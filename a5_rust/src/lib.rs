@@ -1,7 +1,6 @@
 use a5;
 use std::ffi::CString;
 
-
 #[repr(C)]
 pub struct ResultU64 {
     pub value: u64,
@@ -15,7 +14,7 @@ pub struct ResultLonLat {
     pub error: *mut std::os::raw::c_char, // null if no error
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_lon_lat_to_cell(longitude: f64, latitude: f64, resolution: i32) -> ResultU64 {
     match a5::lonlat_to_cell(a5::LonLat::new(longitude, latitude), resolution) {
         Ok(cell) => ResultU64 { value: cell, error: std::ptr::null_mut() },
@@ -26,7 +25,7 @@ pub extern "C" fn a5_lon_lat_to_cell(longitude: f64, latitude: f64, resolution: 
     }
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_cell_to_parent(index: u64, parent_resolution: i32) -> ResultU64 {
     match a5::cell_to_parent(index, Some(parent_resolution)) {
         Ok(cell) => ResultU64 { value: cell, error: std::ptr::null_mut() },
@@ -38,12 +37,12 @@ pub extern "C" fn a5_cell_to_parent(index: u64, parent_resolution: i32) -> Resul
 }
 
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_cell_area(resolution: i32) -> f64 {
     a5::cell_area(resolution)
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_cell_to_lon_lat(cell: u64) -> ResultLonLat {
     match a5::cell_to_lonlat(cell) {
         Ok(lonlat) => ResultLonLat { longitude: lonlat.longitude.get(), latitude: lonlat.latitude.get(), error: std::ptr::null_mut() },
@@ -54,12 +53,12 @@ pub extern "C" fn a5_cell_to_lon_lat(cell: u64) -> ResultLonLat {
     }
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_get_num_cells(resolution: i32) -> u64 {
     a5::get_num_cells(resolution)
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_get_resolution(index: u64) -> i32 {
     a5::get_resolution(index)
 }
@@ -121,7 +120,7 @@ pub fn cell_vec_result_to_c(result: Result<Vec<u64>, String>) -> CellArray {
 }
 
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_free_lonlatdegrees_array(arr: LonLatDegreesArray) {
     if !arr.data.is_null() {
         unsafe {
@@ -134,7 +133,7 @@ pub extern "C" fn a5_free_lonlatdegrees_array(arr: LonLatDegreesArray) {
     }
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_free_cell_array(arr: CellArray) {
     if !arr.data.is_null() {
         unsafe {
@@ -149,12 +148,12 @@ pub extern "C" fn a5_free_cell_array(arr: CellArray) {
 
 
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_cell_to_boundary(cell_id: u64) -> LonLatDegreesArray {
     vec_result_to_c(a5::cell_to_boundary(cell_id, None))
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_cell_to_children(index: u64, child_resolution: i32) -> CellArray {
     match child_resolution {
         r if r >= 0 && r < 31 => {
@@ -164,8 +163,7 @@ pub extern "C" fn a5_cell_to_children(index: u64, child_resolution: i32) -> Cell
     }
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn a5_get_res0_cells() -> CellArray {
     cell_vec_result_to_c(a5::get_res0_cells())
 }
-
