@@ -20,4 +20,3 @@ jobs:
       ci_tools_version: main
       extension_name: a5
       enable_rust: true
-      exclude_archs: "wasm_mvp;wasm_eh;wasm_threads;"
