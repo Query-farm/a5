@@ -9,4 +9,4 @@ name = "a5_rust"
 crate-type = ["staticlib"]
 
 [dependencies]
-a5 = "0.5.0"
+a5 = "0.5.1"
