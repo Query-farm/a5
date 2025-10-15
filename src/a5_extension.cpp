@@ -37,9 +37,10 @@ inline void A5GetResolutionFun(DataChunk &args, ExpressionState &state, Vector &
 	                                          [&](uint64_t cell) { return a5_get_resolution(cell); });
 }
 
-inline void A5LonLatToCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &lon_vector = args.data[0];
-	auto &lat_vector = args.data[1];
+inline void A5LatLonToCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	// Specify latitude first.
+	auto &lon_vector = args.data[1];
+	auto &lat_vector = args.data[0];
 	auto &resolution_vector = args.data[2];
 
 	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
@@ -73,7 +74,7 @@ inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &r
 	    });
 }
 
-inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &result) {
+inline void A5CellToLatLonFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
 
 	auto &result_data_children = ArrayVector::GetEntry(result);
@@ -99,8 +100,9 @@ inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &r
 			throw InvalidInputException(res.error);
 		}
 
-		data_ptr[i * 2] = res.longitude;
-		data_ptr[i * 2 + 1] = res.latitude;
+		// lat then lon
+		data_ptr[i * 2] = res.latitude;
+		data_ptr[i * 2 + 1] = res.longitude;
 	}
 
 	if (args.size() == 1) {
@@ -160,8 +162,8 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 		for (auto i = 0; i < boundary_result.len; i++) {
 			auto coord = boundary_result.data[i];
 			vector<Value> coord_vec;
-			coord_vec.emplace_back(Value::DOUBLE(coord.lon));
 			coord_vec.emplace_back(Value::DOUBLE(coord.lat));
+			coord_vec.emplace_back(Value::DOUBLE(coord.lon));
 			ListVector::PushBack(result, Value::ARRAY(LogicalType::DOUBLE, coord_vec));
 		}
 		list_entry_t out {offset, boundary_result.len};
@@ -197,18 +199,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    ScalarFunction("a5_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
 	loader.RegisterFunction(a5_get_resolution_func);
 
-	auto a5_lon_lat_to_cell_func =
+	auto a5_lat_lon_to_cell_func =
 	    ScalarFunction("a5_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-	                   LogicalType::UBIGINT, A5LonLatToCellFun);
-	loader.RegisterFunction(a5_lon_lat_to_cell_func);
+	                   LogicalType::UBIGINT, A5LatLonToCellFun);
+	loader.RegisterFunction(a5_lat_lon_to_cell_func);
 
 	auto a5_cell_to_parent_func = ScalarFunction("a5_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
 	                                             LogicalType::UBIGINT, A5CellToParentFun);
 	loader.RegisterFunction(a5_cell_to_parent_func);
 
-	auto a5_cell_to_lon_lat_func = ScalarFunction("a5_lon_lat", {LogicalType::UBIGINT},
-	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
-	loader.RegisterFunction(a5_cell_to_lon_lat_func);
+	auto a5_cell_to_lat_lon_func = ScalarFunction("a5_lat_lon", {LogicalType::UBIGINT},
+	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLatLonFun);
+	loader.RegisterFunction(a5_cell_to_lat_lon_func);
 
 	auto a5_cell_to_children_func = ScalarFunction("a5_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
 	                                               LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun);
@@ -223,7 +225,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun);
 	loader.RegisterFunction(a5_cell_to_boundary_func);
 
-	QueryFarmSendTelemetry(loader, "a5", "2025101101");
+	QueryFarmSendTelemetry(loader, "a5", "2025101501");
 }
 
 void A5Extension::Load(ExtensionLoader &loader) {
@@ -234,7 +236,7 @@ std::string A5Extension::Name() {
 }
 
 std::string A5Extension::Version() const {
-	return "2025101101";
+	return "2025101501";
 }
 
 } // namespace duckdb
