@@ -17,7 +17,7 @@ A5 is an innovative geospatial index that partitions the world into [pentagonal 
 Group point data spatially to understand distributions:
 ```sql
 -- Analyze restaurant density by A5 cells
-SELECT a5_cell(latitude, longitude, 15) as cell_id, COUNT(*) as restaurant_count
+SELECT a5_lonlat_to_cell(longitude, latitude, 15) as cell_id, COUNT(*) as restaurant_count
 FROM restaurants
 GROUP BY cell_id
 ORDER BY restaurant_count DESC;
@@ -38,16 +38,16 @@ LOAD a5;
 
 ```sql
 -- Get the A5 cell for a specific location (latitude, longitude, resolution)
-SELECT a5_cell(40.7128, -74.0060, 15) as nyc_cell;  -- Times Square
+SELECT a5_lonlat_to_cell(-74.0060, 40.7128, 15) as nyc_cell;  -- Times Square
 ┌─────────────────────┐
 │      nyc_cell       │
 │       uint64        │
 ├─────────────────────┤
 │ 2742821848331845632 │
-│ (2.74 quintillion)  │
 └─────────────────────┘
+
 -- Find the area of that cell in square meters
-SELECT a5_area(15) as cell_area_m2;
+SELECT a5_cell_area(15) as cell_area_m2;
 ┌───────────────────┐
 │   cell_area_m2    │
 │      double       │
@@ -56,26 +56,25 @@ SELECT a5_area(15) as cell_area_m2;
 └───────────────────┘
 
 -- Get the center coordinates of a cell
-SELECT a5_lat_lon(a5_cell(40.7128, -74.0060, 15)) as center_coords;
+SELECT a5_cell_to_lonlat(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as center_coords;
 ┌─────────────────────────────────────────┐
 │              center_coords              │
 │                double[2]                │
 ├─────────────────────────────────────────┤
-│ [40.71280225138428, -74.00764805615836] │
+│ [-74.00764805615836, 40.71280225138428] │
 └─────────────────────────────────────────┘
 
 -- Find parent cell at lower resolution
-SELECT a5_parent(a5_cell(40.7128, -74.0060, 15), 10) as parent_cell;
+SELECT a5_cell_to_parent(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 10) as parent_cell;
 ┌─────────────────────┐
 │     parent_cell     │
 │       uint64        │
 ├─────────────────────┤
 │ 2742821365684895744 │
-│ (2.74 quintillion)  │
 └─────────────────────┘
 
 -- Get all children cells at higher resolution
-SELECT a5_children(a5_cell(40.7128, -74.0060, 10), 11) as child_cells;
+SELECT a5_cell_to_children(a5_lonlat_to_cell(-74.0060, 40.7128, 10), 11) as child_cells;
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
 │                                     child_cells                                      │
 │                                       uint64[]                                       │
@@ -94,10 +93,10 @@ SELECT
         ST_MakePolygon(
             ST_MakeLine(
                 list_transform(
-                    a5_boundary(
-                        a5_cell(40.41677, -3.7037, 10)
+                    a5_cell_to_boundary(
+                        a5_lonlat_to_cell(-3.7037, 40.41677, 10)
                     ),
-                    x -> ST_Point(x[2], x[1])
+                    x -> ST_Point(x[1], x[2])
                 )
             )
         )
@@ -145,7 +144,7 @@ Visualizing that A5 cell shows:
 
 ### Core Functions
 
-#### `a5_cell(latitude, longitude, resolution) -> UBIGINT`
+#### `a5_lonlat_to_cell(latitude, longitude, resolution) -> UBIGINT`
 
 Returns the A5 cell ID for given coordinates and resolution level.
 
@@ -157,7 +156,7 @@ Returns the A5 cell ID for given coordinates and resolution level.
 
 **Example:**
 ```sql
-SELECT a5_cell(51.5074, -0.1278, 12) as london_cell;
+SELECT a5_lonlat_to_cell(-0.1278, 51.5074, 12) as london_cell;
 ┌─────────────────────┐
 │     london_cell     │
 │       uint64        │
@@ -166,13 +165,13 @@ SELECT a5_cell(51.5074, -0.1278, 12) as london_cell;
 └─────────────────────┘
 ```
 
-#### `a5_area(resolution) -> DOUBLE`
+#### `a5_cell_area(resolution) -> DOUBLE`
 
-Returns the area of an A5 cell in the specified resolution  in square meters.
+Returns the area of an A5 cell in the specified resolution in square meters.
 
 **Example:**
 ```sql
-SELECT a5_area(5) as area_m2;
+SELECT a5_cell_area(5) as area_m2;
 ┌────────────────────┐
 │      area_m2       │
 │       double       │
@@ -181,13 +180,13 @@ SELECT a5_area(5) as area_m2;
 └────────────────────┘
 ```
 
-#### `a5_resolution(cell_id) -> INTEGER`
+#### `a5_get_resolution(cell_id) -> INTEGER`
 
 Returns the resolution level of an A5 cell.
 
 **Example:**
 ```sql
-SELECT a5_resolution(207618739568) as resolution;
+SELECT a5_get_resolution(207618739568) as resolution;
 ┌────────────┐
 │ resolution │
 │   int32    │
@@ -198,13 +197,13 @@ SELECT a5_resolution(207618739568) as resolution;
 
 ### Spatial Relationships
 
-#### `a5_parent(cell_id, target_resolution) -> UBIGINT`
+#### `a5_cell_to_parent(cell_id, target_resolution) -> UBIGINT`
 
 Returns the parent cell at a coarser resolution level.
 
 **Example:**
 ```sql
-SELECT a5_parent(207618739568, 10) as parent_cell;
+SELECT a5_cell_to_parent(207618739568, 10) as parent_cell;
 ┌──────────────────┐
 │   parent_cell    │
 │      uint64      │
@@ -213,67 +212,70 @@ SELECT a5_parent(207618739568, 10) as parent_cell;
 └──────────────────┘
 ```
 
-#### `a5_children(cell_id, target_resolution) -> UBIGINT[]`
+#### `a5_cell_to_children(cell_id, target_resolution) -> UBIGINT[]`
 
 Returns all children cells at a finer resolution level.
 
 **Example:**
 ```sql
-SELECT a5_children(207618739568, 28) as child_cells;
-┌──────────────────────────────────────────────────────────┐
-│                       child_cells                        │
-│                         uint64[]                         │
-├──────────────────────────────────────────────────────────┤
-│ [207618739528, 207618739544, 207618739560, 207618739576] │
-└──────────────────────────────────────────────────────────┘
+SELECT unnest(a5_cell_to_children(207618739568, 28)) as child_cells;
+┌──────────────┐
+│ child_cells  │
+│    uint64    │
+├──────────────┤
+│ 207618739528 │
+│ 207618739544 │
+│ 207618739560 │
+│ 207618739576 │
+└──────────────┘
 ```
 
 ### Geometric Properties
 
-#### `a5_lat_lon(cell_id) -> DOUBLE[2]`
+#### `a5_cell_to_lonlat(cell_id) -> DOUBLE[2]`
 
-Returns the center coordinates [latitude, longitude] of a cell.
+Returns the center coordinates [longitude, latitude] of a cell.
 
 **Example:**
 ```sql
-SELECT a5_lat_lon(207618739568) as center;
+SELECT a5_cell_to_lonlat(207618739568) as center;
 ┌─────────────────────────────────────────┐
 │                 center                  │
 │                double[2]                │
 ├─────────────────────────────────────────┤
-│ [52.76769886727584, -129.0078555564143] │
+│ [-129.0078555564143, 52.76769886727584] │
 └─────────────────────────────────────────┘
 ```
 
-#### `a5_boundary(cell_id) -> DOUBLE[2][]`
+#### `a5_cell_to_boundary(cell_id) -> DOUBLE[2][]`
 
 Returns the boundary vertices of a cell as an array of [latitude, longitude] pairs.
 
 **Example:**
 ```sql
-SELECT unnest(a5_boundary(207618739568)) as boundary_points;
+SELECT unnest(a5_cell_to_boundary(207618739568)) as boundary_points;
 ┌───────────────────────────────────────────┐
 │              boundary_points              │
 │                 double[2]                 │
 ├───────────────────────────────────────────┤
-│ [52.767699205314614, -129.00785542696357] │
-│ [52.767698942751544, -129.00785579342767] │
-│ [52.76769861890205, -129.0078559316034]   │
-│ [52.76769862844177, -129.00785542684645]  │
-│ [52.767698940969176, -129.0078552032305]  │
-│ [52.767699205314614, -129.00785542696357] │
+│ [-129.00785542696357, 52.767699205314614] │
+│ [-129.00785579342767, 52.767698942751544] │
+│ [-129.0078559316034, 52.76769861890205]   │
+│ [-129.00785542684645, 52.76769862844177]  │
+│ [-129.0078552032305, 52.767698940969176]  │
+│ [-129.00785542696357, 52.767699205314614] │
 └───────────────────────────────────────────┘
 ```
 
 ### Utility Functions
 
-#### `a5_num_cells(resolution) -> UBIGINT`
+#### `a5_get_num_cells(resolution) -> UBIGINT`
 
 Returns the total number of A5 cells at a given resolution level.
 
 **Example:**
 ```sql
-SELECT a5_num_cells(15) as total_cells;
+SELECT a5_get_num_cells(15) as total_cells;
 ┌─────────────────┐
 │   total_cells   │
 │     uint64      │
@@ -282,13 +284,13 @@ SELECT a5_num_cells(15) as total_cells;
 └─────────────────┘
 ```
 
-#### `a5_res0_cells() -> UBIGINT[]`
+#### `a5_get_res0_cells() -> UBIGINT[]`
 
 Returns all 12 base cells at resolution level 0.
 
 **Example:**
 ```sql
-SELECT unnest(a5_res0_cells()) as base_cells;
+SELECT unnest(a5_get_res0_cells()) as base_cells;
 ┌─────────────────────┐
 │     base_cells      │
 │       uint64        │
