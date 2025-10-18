@@ -20,6 +20,11 @@ typedef struct ResultLonLat {
 	char *error;
 } ResultLonLat;
 
+typedef struct CellBoundaryOptions {
+	bool closed_ring;
+	int32_t segments;
+} CellBoundaryOptions;
+
 typedef struct LonLatDegrees {
 	double lon;
 	double lat;
@@ -53,7 +58,7 @@ void a5_free_lonlatdegrees_array(struct LonLatDegreesArray arr);
 
 void a5_free_cell_array(struct CellArray arr);
 
-struct LonLatDegreesArray a5_cell_to_boundary(uint64_t cell_id);
+struct LonLatDegreesArray a5_cell_to_boundary(uint64_t cell_id, struct CellBoundaryOptions options);
 
 struct CellArray a5_cell_to_children(uint64_t index, int32_t child_resolution);
 

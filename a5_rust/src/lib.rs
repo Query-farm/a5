@@ -14,6 +14,25 @@ pub struct ResultLonLat {
     pub error: *mut std::os::raw::c_char, // null if no error
 }
 
+#[repr(C)]
+pub struct CellBoundaryOptions {
+    pub closed_ring: bool,
+    /// Number of segments to use for each edge. Pass None to use the resolution of the cell (default: None)
+    pub segments: i32,
+}
+
+
+impl CellBoundaryOptions {
+    pub fn new(closed_ring: bool, segments: Option<i32>) -> Self {
+        Self { closed_ring, segments: segments.unwrap_or(-1) }
+    }
+
+    pub fn segments(&self) -> Option<i32> {
+        if self.segments < 0 { None } else { Some(self.segments) }
+    }
+}
+
+
 #[no_mangle]
 pub extern "C" fn a5_lon_lat_to_cell(longitude: f64, latitude: f64, resolution: i32) -> ResultU64 {
     match a5::lonlat_to_cell(a5::LonLat::new(longitude, latitude), resolution) {
@@ -149,8 +168,8 @@ pub extern "C" fn a5_free_cell_array(arr: CellArray) {
 
 
 #[no_mangle]
-pub extern "C" fn a5_cell_to_boundary(cell_id: u64) -> LonLatDegreesArray {
-    vec_result_to_c(a5::cell_to_boundary(cell_id, None))
+pub extern "C" fn a5_cell_to_boundary(cell_id: u64, options: CellBoundaryOptions) -> LonLatDegreesArray {
+    vec_result_to_c(a5::cell_to_boundary(cell_id, Some(a5::core::cell::CellToBoundaryOptions { closed_ring: options.closed_ring, segments: options.segments() })))
 }
 
 #[no_mangle]
