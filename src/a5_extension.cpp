@@ -138,37 +138,62 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 
 inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
-
 	ListVector::Reserve(result, args.size() * 5);
 	uint64_t offset = 0;
 
-	UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
+	auto compute_boundary = [&](uint64_t cell_id, bool closed_ring, int32_t segments) -> list_entry_t {
 		if (cell_id == 0) {
 			// A5 defines cell 0 as invalid / non-existent, so return an empty boundary
-			return list_entry_t {0, 0};
+			return {0, 0};
 		}
 
-		auto boundary_result = a5_cell_to_boundary(cell_id);
+		CellBoundaryOptions options;
+		options.closed_ring = closed_ring;
+		options.segments = segments;
 
+		auto boundary_result = a5_cell_to_boundary(cell_id, options);
 		if (boundary_result.error) {
 			throw InvalidInputException(boundary_result.error);
 		}
-
 		if (boundary_result.len == 0) {
-			return list_entry_t {0, 0};
+			a5_free_lonlatdegrees_array(boundary_result);
+			return {0, 0};
 		}
-		for (auto i = 0; i < boundary_result.len; i++) {
-			auto coord = boundary_result.data[i];
-			vector<Value> coord_vec;
-			coord_vec.emplace_back(Value::DOUBLE(coord.lon));
-			coord_vec.emplace_back(Value::DOUBLE(coord.lat));
-			ListVector::PushBack(result, Value::ARRAY(LogicalType::DOUBLE, coord_vec));
+
+		for (int i = 0; i < boundary_result.len; i++) {
+			auto &coord = boundary_result.data[i];
+			ListVector::PushBack(
+			    result, Value::ARRAY(LogicalType::DOUBLE, {Value::DOUBLE(coord.lon), Value::DOUBLE(coord.lat)}));
 		}
+
 		list_entry_t out {offset, boundary_result.len};
 		offset += boundary_result.len;
 		a5_free_lonlatdegrees_array(boundary_result);
 		return out;
-	});
+	};
+
+	if (args.ColumnCount() == 1) {
+		UnaryExecutor::Execute<uint64_t, list_entry_t>(
+		    cell_vector, result, args.size(), [&](uint64_t cell_id) { return compute_boundary(cell_id, true, -1); });
+	} else if (args.ColumnCount() == 2) {
+		auto &closed_ring_vector = args.data[1];
+		BinaryExecutor::Execute<uint64_t, bool, list_entry_t>(
+		    cell_vector, closed_ring_vector, result, args.size(),
+		    [&](uint64_t cell_id, bool closed_ring) { return compute_boundary(cell_id, closed_ring, -1); });
+	} else if (args.ColumnCount() == 3) {
+		auto &closed_ring_vector = args.data[1];
+		auto &segments_vector = args.data[2];
+		TernaryExecutor::Execute<uint64_t, bool, int32_t, list_entry_t>(
+		    cell_vector, closed_ring_vector, segments_vector, result, args.size(),
+		    [&](uint64_t cell_id, bool closed_ring, int32_t segments) {
+			    if (segments <= 0) {
+				    segments = -1;
+			    }
+			    return compute_boundary(cell_id, closed_ring, segments);
+		    });
+	} else {
+		throw InvalidInputException("A5CellToBoundaryFun: expected 1, 2 or 3 arguments.");
+	}
 }
 
 inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -218,8 +243,19 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    ScalarFunction("a5_get_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
 	loader.RegisterFunction(a5_get_res0_cells_func);
 
+	auto boundary_set = ScalarFunctionSet("a5_cell_to_boundary");
+	boundary_set.AddFunction(ScalarFunction(
+	    {LogicalType::UBIGINT}, LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
+	boundary_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN},
+	                                        LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
+	                                        A5CellToBoundaryFun));
+	boundary_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
+	                                        LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
+	                                        A5CellToBoundaryFun));
+	loader.RegisterFunction(boundary_set);
+
 	auto a5_cell_to_boundary_func =
-	    ScalarFunction("a5_cell_to_boundary", {LogicalType::UBIGINT},
+	    ScalarFunction("a5_cell_to_boundary", {LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
 	                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun);
 	loader.RegisterFunction(a5_cell_to_boundary_func);
 
