@@ -365,7 +365,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                   LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
 	loader.RegisterFunction(a5_uncompact_func);
 
-	QueryFarmSendTelemetry(loader, "a5", "2025101601");
+	QueryFarmSendTelemetry(loader, "a5", "2025110601");
 }
 
 void A5Extension::Load(ExtensionLoader &loader) {
@@ -376,7 +376,7 @@ std::string A5Extension::Name() {
 }
 
 std::string A5Extension::Version() const {
-	return "2025101601";
+	return "2025110601";
 }
 
 } // namespace duckdb
