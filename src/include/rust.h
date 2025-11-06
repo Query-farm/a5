@@ -63,4 +63,8 @@ struct LonLatDegreesArray a5_cell_to_boundary(uint64_t cell_id, struct CellBound
 struct CellArray a5_cell_to_children(uint64_t index, int32_t child_resolution);
 
 struct CellArray a5_get_res0_cells(void);
+
+struct CellArray a5_compact(uint64_t *data, uintptr_t len);
+
+struct CellArray a5_uncompact(uint64_t *data, uintptr_t len, int32_t target_resolution);
 }

@@ -109,31 +109,56 @@ inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &r
 }
 
 inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &cell_vector = args.data[0];
-	auto &max_resolution_vector = args.data[1];
-
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
-	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
-	    cell_vector, max_resolution_vector, result, args.size(), [&](uint64_t cell_id, int32_t child_resolution) {
-		    auto child_result = a5_cell_to_children(cell_id, child_resolution);
+	if (args.ColumnCount() == 2) {
+		auto &cell_vector = args.data[0];
+		auto &max_resolution_vector = args.data[1];
 
-		    if (child_result.error) {
-			    throw InvalidInputException(child_result.error);
-		    }
+		BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
+		    cell_vector, max_resolution_vector, result, args.size(), [&](uint64_t cell_id, int32_t child_resolution) {
+			    auto child_result = a5_cell_to_children(cell_id, child_resolution);
 
-		    if (child_result.len == 0) {
-			    return list_entry_t {0, 0};
-		    }
-		    for (auto i = 0; i < child_result.len; i++) {
-			    ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
-		    }
-		    list_entry_t out {offset, child_result.len};
-		    offset += child_result.len;
-		    a5_free_cell_array(child_result);
-		    return out;
-	    });
+			    if (child_result.error) {
+				    throw InvalidInputException(child_result.error);
+			    }
+
+			    if (child_result.len == 0) {
+				    return list_entry_t {0, 0};
+			    }
+			    for (auto i = 0; i < child_result.len; i++) {
+				    ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
+			    }
+			    list_entry_t out {offset, child_result.len};
+			    offset += child_result.len;
+			    a5_free_cell_array(child_result);
+			    return out;
+		    });
+	} else if (args.ColumnCount() == 1) {
+		auto &cell_vector = args.data[0];
+
+		UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
+			auto child_result = a5_cell_to_children(cell_id, -1);
+
+			if (child_result.error) {
+				throw InvalidInputException(child_result.error);
+			}
+
+			if (child_result.len == 0) {
+				return list_entry_t {0, 0};
+			}
+			for (auto i = 0; i < child_result.len; i++) {
+				ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
+			}
+			list_entry_t out {offset, child_result.len};
+			offset += child_result.len;
+			a5_free_cell_array(child_result);
+			return out;
+		});
+	} else {
+		throw InvalidInputException("A5CellToChildrenFun: expected 1 or 2 arguments.");
+	}
 }
 
 inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -209,8 +234,76 @@ inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &r
 	result.Reference(val);
 }
 
-static void LoadInternal(ExtensionLoader &loader) {
+inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_list_vector = args.data[0];
 
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetEntry(cell_list_vector));
+
+	auto result_size = ListVector::GetListSize(result);
+
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(
+	    cell_list_vector, result, args.size(), [&](list_entry_t cell_list_entry) {
+		    // We need to prepare the list of values to pass in.
+		    auto compact_result = a5_compact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
+		    if (compact_result.error) {
+			    throw InvalidInputException(compact_result.error);
+		    }
+		    if (compact_result.len == 0) {
+			    return list_entry_t {0, 0};
+		    }
+		    ListVector::Reserve(result, result_size + compact_result.len);
+		    for (auto i = 0; i < compact_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
+		    }
+		    result_size += compact_result.len;
+
+		    list_entry_t out {offset, compact_result.len};
+		    offset += compact_result.len;
+		    a5_free_cell_array(compact_result);
+		    return out;
+	    });
+}
+
+inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_list_vector = args.data[0];
+	auto &target_resolution_vector = args.data[1];
+
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetEntry(cell_list_vector));
+
+	auto result_size = ListVector::GetListSize(result);
+
+	BinaryExecutor::Execute<list_entry_t, int32_t, list_entry_t>(
+	    cell_list_vector, target_resolution_vector, result, args.size(),
+	    [&](list_entry_t cell_list_entry, int32_t target_resolution) {
+		    // We need to prepare the list of values to pass in.
+		    auto compact_result =
+		        a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length, target_resolution);
+		    if (compact_result.error) {
+			    throw InvalidInputException(compact_result.error);
+		    }
+		    if (compact_result.len == 0) {
+			    return list_entry_t {0, 0};
+		    }
+		    ListVector::Reserve(result, result_size + compact_result.len);
+		    for (auto i = 0; i < compact_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
+		    }
+		    result_size += compact_result.len;
+
+		    list_entry_t out {offset, compact_result.len};
+		    offset += compact_result.len;
+		    a5_free_cell_array(compact_result);
+		    return out;
+	    });
+}
+
+static void LoadInternal(ExtensionLoader &loader) {
 	auto a5_cell_area_func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
 	loader.RegisterFunction(a5_cell_area_func);
 
@@ -235,9 +328,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
 	loader.RegisterFunction(a5_cell_to_lon_lat_func);
 
-	auto a5_cell_to_children_func = ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
-	                                               LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun);
-	loader.RegisterFunction(a5_cell_to_children_func);
+	auto a5_cell_to_children_set = ScalarFunctionSet("a5_cell_to_children");
+	a5_cell_to_children_set.AddFunction(ScalarFunction("a5_cell_to_children",
+	                                                   {LogicalType::UBIGINT, LogicalType::INTEGER},
+	                                                   LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+	a5_cell_to_children_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT},
+	                                                   LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+	loader.RegisterFunction(a5_cell_to_children_set);
 
 	auto a5_get_res0_cells_func =
 	    ScalarFunction("a5_get_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
@@ -258,6 +355,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    ScalarFunction("a5_cell_to_boundary", {LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
 	                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun);
 	loader.RegisterFunction(a5_cell_to_boundary_func);
+
+	auto a5_compact_func = ScalarFunction("a5_compact", {LogicalType::LIST(LogicalType::UBIGINT)},
+	                                      LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
+	loader.RegisterFunction(a5_compact_func);
+
+	auto a5_uncompact_func =
+	    ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER},
+	                   LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
+	loader.RegisterFunction(a5_uncompact_func);
 
 	QueryFarmSendTelemetry(loader, "a5", "2025101601");
 }
