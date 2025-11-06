@@ -165,8 +165,6 @@ pub extern "C" fn a5_free_cell_array(arr: CellArray) {
     }
 }
 
-
-
 #[no_mangle]
 pub extern "C" fn a5_cell_to_boundary(cell_id: u64, options: CellBoundaryOptions) -> LonLatDegreesArray {
     vec_result_to_c(a5::cell_to_boundary(cell_id, Some(a5::core::cell::CellToBoundaryOptions { closed_ring: options.closed_ring, segments: options.segments() })))
@@ -186,3 +184,22 @@ pub extern "C" fn a5_cell_to_children(index: u64, child_resolution: i32) -> Cell
 pub extern "C" fn a5_get_res0_cells() -> CellArray {
     cell_vec_result_to_c(a5::get_res0_cells())
 }
+
+#[no_mangle]
+pub extern "C" fn a5_compact(cells: *const u64, len: usize) -> CellArray {
+    if cells.is_null() || len == 0 {
+        return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
+    }
+    let cell_slice = unsafe { std::slice::from_raw_parts(cells, len) };
+    cell_vec_result_to_c(a5::compact(cell_slice))
+}
+
+#[no_mangle]
+pub extern "C" fn a5_uncompact(cells: *const u64, len: usize, target_resolution: i32) -> CellArray {
+    if cells.is_null() || len == 0 {
+        return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
+    }
+    let cell_slice = unsafe { std::slice::from_raw_parts(cells, len) };
+    cell_vec_result_to_c(a5::uncompact(cell_slice, target_resolution))
+}
+
