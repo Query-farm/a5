@@ -11,12 +11,26 @@ namespace duckdb {
 
 #define MAX_RESOLUTION 30
 
+// Helper function to validate resolution and throw with a clear error message
+inline void ValidateResolution(int32_t resolution, const char *function_name) {
+	if (resolution < 0 || resolution > MAX_RESOLUTION) {
+		throw InvalidInputException(string(function_name) + ": Resolution must be between 0 and 30");
+	}
+}
+
+// Helper function to safely throw with error from Rust, freeing the error string
+inline void ThrowRustError(char *error_ptr, const char *function_name) {
+	if (error_ptr != nullptr) {
+		string error_msg = string(function_name) + ": " + string(error_ptr);
+		free(error_ptr);
+		throw InvalidInputException(error_msg);
+	}
+}
+
 inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
 	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
-		if (resolution > MAX_RESOLUTION) {
-			throw InvalidInputException("Resolution must be between 0 and 30");
-		}
+		ValidateResolution(resolution, "a5_cell_area");
 		return a5_cell_area(resolution);
 	});
 }
@@ -24,9 +38,7 @@ inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &resul
 inline void A5GetNumCellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
 	UnaryExecutor::Execute<int32_t, uint64_t>(resolution_vector, result, args.size(), [&](int32_t resolution) {
-		if (resolution > MAX_RESOLUTION) {
-			throw InvalidInputException("Resolution must be between 0 and 30");
-		}
+		ValidateResolution(resolution, "a5_get_num_cells");
 		return a5_get_num_cells(resolution);
 	});
 }
@@ -45,13 +57,9 @@ inline void A5LonLatToCellFun(DataChunk &args, ExpressionState &state, Vector &r
 	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
 	    lon_vector, lat_vector, resolution_vector, result, args.size(),
 	    [&](double lon, double lat, int32_t resolution) {
-		    if (resolution > MAX_RESOLUTION) {
-			    throw InvalidInputException("Resolution must be between 0 and 30");
-		    }
+		    ValidateResolution(resolution, "a5_lonlat_to_cell");
 		    struct ResultU64 res = a5_lon_lat_to_cell(lon, lat, resolution);
-		    if (res.error != nullptr) {
-			    throw InvalidInputException(res.error);
-		    }
+		    ThrowRustError(res.error, "a5_lonlat_to_cell");
 		    return res.value;
 	    });
 }
@@ -62,13 +70,9 @@ inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &r
 
 	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
 	    cell_vector, parent_resolution_vector, result, args.size(), [&](uint64_t cell, int32_t parent_resolution) {
-		    if (parent_resolution > MAX_RESOLUTION) {
-			    throw InvalidInputException("Resolution must be between 0 and 30");
-		    }
+		    ValidateResolution(parent_resolution, "a5_cell_to_parent");
 		    struct ResultU64 res = a5_cell_to_parent(cell, parent_resolution);
-		    if (res.error != nullptr) {
-			    throw InvalidInputException(res.error);
-		    }
+		    ThrowRustError(res.error, "a5_cell_to_parent");
 		    return res.value;
 	    });
 }
@@ -95,9 +99,7 @@ inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &r
 		}
 
 		struct ResultLonLat res = a5_cell_to_lon_lat(input_data_ptr[cell_idx]);
-		if (res.error != nullptr) {
-			throw InvalidInputException(res.error);
-		}
+		ThrowRustError(res.error, "a5_cell_to_lonlat");
 
 		data_ptr[i * 2] = res.longitude;
 		data_ptr[i * 2 + 1] = res.latitude;
@@ -121,10 +123,13 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 			    auto child_result = a5_cell_to_children(cell_id, child_resolution);
 
 			    if (child_result.error) {
-				    throw InvalidInputException(child_result.error);
+				    string error_msg = string("a5_cell_to_children: ") + string(child_result.error);
+				    a5_free_cell_array(child_result);
+				    throw InvalidInputException(error_msg);
 			    }
 
 			    if (child_result.len == 0) {
+				    a5_free_cell_array(child_result);
 				    return list_entry_t {0, 0};
 			    }
 			    for (auto i = 0; i < child_result.len; i++) {
@@ -142,10 +147,13 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 			auto child_result = a5_cell_to_children(cell_id, -1);
 
 			if (child_result.error) {
-				throw InvalidInputException(child_result.error);
+				string error_msg = string("a5_cell_to_children: ") + string(child_result.error);
+				a5_free_cell_array(child_result);
+				throw InvalidInputException(error_msg);
 			}
 
 			if (child_result.len == 0) {
+				a5_free_cell_array(child_result);
 				return list_entry_t {0, 0};
 			}
 			for (auto i = 0; i < child_result.len; i++) {
@@ -178,7 +186,9 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 
 		auto boundary_result = a5_cell_to_boundary(cell_id, options);
 		if (boundary_result.error) {
-			throw InvalidInputException(boundary_result.error);
+			string error_msg = string("a5_cell_to_boundary: ") + string(boundary_result.error);
+			a5_free_lonlatdegrees_array(boundary_result);
+			throw InvalidInputException(error_msg);
 		}
 		if (boundary_result.len == 0) {
 			a5_free_lonlatdegrees_array(boundary_result);
@@ -249,9 +259,12 @@ inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result
 		    // We need to prepare the list of values to pass in.
 		    auto compact_result = a5_compact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
 		    if (compact_result.error) {
-			    throw InvalidInputException(compact_result.error);
+			    string error_msg = string("a5_compact: ") + string(compact_result.error);
+			    a5_free_cell_array(compact_result);
+			    throw InvalidInputException(error_msg);
 		    }
 		    if (compact_result.len == 0) {
+			    a5_free_cell_array(compact_result);
 			    return list_entry_t {0, 0};
 		    }
 		    ListVector::Reserve(result, result_size + compact_result.len);
@@ -285,9 +298,12 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 		    auto compact_result =
 		        a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length, target_resolution);
 		    if (compact_result.error) {
-			    throw InvalidInputException(compact_result.error);
+			    string error_msg = string("a5_uncompact: ") + string(compact_result.error);
+			    a5_free_cell_array(compact_result);
+			    throw InvalidInputException(error_msg);
 		    }
 		    if (compact_result.len == 0) {
+			    a5_free_cell_array(compact_result);
 			    return list_entry_t {0, 0};
 		    }
 		    ListVector::Reserve(result, result_size + compact_result.len);
