@@ -37,7 +37,7 @@ LOAD a5;
 ### Basic Usage
 
 ```sql
--- Get the A5 cell for a specific location (latitude, longitude, resolution)
+-- Get the A5 cell for a specific location (longitude, latitude, resolution)
 SELECT a5_lonlat_to_cell(-74.0060, 40.7128, 15) as nyc_cell;  -- Times Square
 ┌─────────────────────┐
 │      nyc_cell       │
@@ -144,14 +144,14 @@ Visualizing that A5 cell shows:
 
 ### Core Functions
 
-#### `a5_lonlat_to_cell(latitude, longitude, resolution) -> UBIGINT`
+#### `a5_lonlat_to_cell(longitude, latitude, resolution) -> UBIGINT`
 
 Returns the A5 cell ID for given coordinates and resolution level.
 
 **Parameters:**
 
-- `latitude` (DOUBLE): Latitude in decimal degrees (-90 to 90)
 - `longitude` (DOUBLE): Longitude in decimal degrees (-180 to 180)
+- `latitude` (DOUBLE): Latitude in decimal degrees (-90 to 90)
 - `resolution` (INTEGER): Resolution level (0-30, where 0 is coarsest)
 
 **Example:**
@@ -249,7 +249,7 @@ SELECT a5_cell_to_lonlat(207618739568) as center;
 
 #### `a5_cell_to_boundary(cell_id, [closed_ring, [segments]]) -> DOUBLE[2][]`
 
-Returns the boundary vertices of a cell as an array of [latitude, longitude] pairs.
+Returns the boundary vertices of a cell as an array of [longitude, latitude] pairs.
 
 **Parameters:**
 
