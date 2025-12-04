@@ -27,6 +27,24 @@ inline void ThrowRustError(char *error_ptr, const char *function_name) {
 	}
 }
 
+// Helper function to check CellArray for error, free it, and throw
+inline void ThrowCellArrayError(CellArray &arr, const char *function_name) {
+	if (arr.error) {
+		string error_msg = string(function_name) + ": " + string(arr.error);
+		a5_free_cell_array(arr);
+		throw InvalidInputException(error_msg);
+	}
+}
+
+// Helper function to check LonLatDegreesArray for error, free it, and throw
+inline void ThrowLonLatArrayError(LonLatDegreesArray &arr, const char *function_name) {
+	if (arr.error) {
+		string error_msg = string(function_name) + ": " + string(arr.error);
+		a5_free_lonlatdegrees_array(arr);
+		throw InvalidInputException(error_msg);
+	}
+}
+
 inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
 	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
@@ -111,6 +129,7 @@ inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &r
 }
 
 inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	// A5 cells have exactly 4 children
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
@@ -120,19 +139,15 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 
 		BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
 		    cell_vector, max_resolution_vector, result, args.size(), [&](uint64_t cell_id, int32_t child_resolution) {
+			    ValidateResolution(child_resolution, "a5_cell_to_children");
 			    auto child_result = a5_cell_to_children(cell_id, child_resolution);
-
-			    if (child_result.error) {
-				    string error_msg = string("a5_cell_to_children: ") + string(child_result.error);
-				    a5_free_cell_array(child_result);
-				    throw InvalidInputException(error_msg);
-			    }
+			    ThrowCellArrayError(child_result, "a5_cell_to_children");
 
 			    if (child_result.len == 0) {
 				    a5_free_cell_array(child_result);
 				    return list_entry_t {0, 0};
 			    }
-			    for (auto i = 0; i < child_result.len; i++) {
+			    for (size_t i = 0; i < child_result.len; i++) {
 				    ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
 			    }
 			    list_entry_t out {offset, child_result.len};
@@ -145,18 +160,13 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 
 		UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
 			auto child_result = a5_cell_to_children(cell_id, -1);
-
-			if (child_result.error) {
-				string error_msg = string("a5_cell_to_children: ") + string(child_result.error);
-				a5_free_cell_array(child_result);
-				throw InvalidInputException(error_msg);
-			}
+			ThrowCellArrayError(child_result, "a5_cell_to_children");
 
 			if (child_result.len == 0) {
 				a5_free_cell_array(child_result);
 				return list_entry_t {0, 0};
 			}
-			for (auto i = 0; i < child_result.len; i++) {
+			for (size_t i = 0; i < child_result.len; i++) {
 				ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
 			}
 			list_entry_t out {offset, child_result.len};
@@ -171,6 +181,7 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 
 inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
+	// A5 cells are pentagons with 5 vertices
 	ListVector::Reserve(result, args.size() * 5);
 	uint64_t offset = 0;
 
@@ -185,17 +196,13 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 		options.segments = segments;
 
 		auto boundary_result = a5_cell_to_boundary(cell_id, options);
-		if (boundary_result.error) {
-			string error_msg = string("a5_cell_to_boundary: ") + string(boundary_result.error);
-			a5_free_lonlatdegrees_array(boundary_result);
-			throw InvalidInputException(error_msg);
-		}
+		ThrowLonLatArrayError(boundary_result, "a5_cell_to_boundary");
 		if (boundary_result.len == 0) {
 			a5_free_lonlatdegrees_array(boundary_result);
 			return {0, 0};
 		}
 
-		for (int i = 0; i < boundary_result.len; i++) {
+		for (size_t i = 0; i < boundary_result.len; i++) {
 			auto &coord = boundary_result.data[i];
 			ListVector::PushBack(
 			    result, Value::ARRAY(LogicalType::DOUBLE, {Value::DOUBLE(coord.lon), Value::DOUBLE(coord.lat)}));
@@ -234,7 +241,7 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cells = a5_get_res0_cells();
 	vector<Value> cell_vec;
-	for (auto i = 0; i < cells.len; i++) {
+	for (size_t i = 0; i < cells.len; i++) {
 		cell_vec.emplace_back(Value::UBIGINT(cells.data[i]));
 	}
 	a5_free_cell_array(cells);
@@ -247,6 +254,7 @@ inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &r
 inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_list_vector = args.data[0];
 
+	// Initial estimate; compacted output is typically smaller than input
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
@@ -258,17 +266,13 @@ inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result
 	    cell_list_vector, result, args.size(), [&](list_entry_t cell_list_entry) {
 		    // We need to prepare the list of values to pass in.
 		    auto compact_result = a5_compact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
-		    if (compact_result.error) {
-			    string error_msg = string("a5_compact: ") + string(compact_result.error);
-			    a5_free_cell_array(compact_result);
-			    throw InvalidInputException(error_msg);
-		    }
+		    ThrowCellArrayError(compact_result, "a5_compact");
 		    if (compact_result.len == 0) {
 			    a5_free_cell_array(compact_result);
 			    return list_entry_t {0, 0};
 		    }
 		    ListVector::Reserve(result, result_size + compact_result.len);
-		    for (auto i = 0; i < compact_result.len; i++) {
+		    for (size_t i = 0; i < compact_result.len; i++) {
 			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
 		    }
 		    result_size += compact_result.len;
@@ -284,6 +288,7 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 	auto &cell_list_vector = args.data[0];
 	auto &target_resolution_vector = args.data[1];
 
+	// Initial estimate; each cell expands to 4 children per resolution level
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
@@ -294,20 +299,17 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 	BinaryExecutor::Execute<list_entry_t, int32_t, list_entry_t>(
 	    cell_list_vector, target_resolution_vector, result, args.size(),
 	    [&](list_entry_t cell_list_entry, int32_t target_resolution) {
+		    ValidateResolution(target_resolution, "a5_uncompact");
 		    // We need to prepare the list of values to pass in.
 		    auto compact_result =
 		        a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length, target_resolution);
-		    if (compact_result.error) {
-			    string error_msg = string("a5_uncompact: ") + string(compact_result.error);
-			    a5_free_cell_array(compact_result);
-			    throw InvalidInputException(error_msg);
-		    }
+		    ThrowCellArrayError(compact_result, "a5_uncompact");
 		    if (compact_result.len == 0) {
 			    a5_free_cell_array(compact_result);
 			    return list_entry_t {0, 0};
 		    }
 		    ListVector::Reserve(result, result_size + compact_result.len);
-		    for (auto i = 0; i < compact_result.len; i++) {
+		    for (size_t i = 0; i < compact_result.len; i++) {
 			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
 		    }
 		    result_size += compact_result.len;
