@@ -322,66 +322,211 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
-	auto a5_cell_area_func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
-	loader.RegisterFunction(a5_cell_area_func);
+	// a5_cell_area: Returns the area of a cell at a given resolution
+	{
+		auto func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the area in square meters of an A5 cell at the specified resolution level";
+		desc.parameter_names = {"resolution"};
+		desc.parameter_types = {LogicalType::INTEGER};
+		desc.examples = {"a5_cell_area(10)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_get_num_cells_func =
-	    ScalarFunction("a5_get_num_cells", {LogicalType::INTEGER}, LogicalType::UBIGINT, A5GetNumCellsFun);
-	loader.RegisterFunction(a5_get_num_cells_func);
+	// a5_get_num_cells: Returns the total number of cells at a given resolution
+	{
+		auto func = ScalarFunction("a5_get_num_cells", {LogicalType::INTEGER}, LogicalType::UBIGINT, A5GetNumCellsFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the total number of A5 cells at the specified resolution level (0-30)";
+		desc.parameter_names = {"resolution"};
+		desc.parameter_types = {LogicalType::INTEGER};
+		desc.examples = {"a5_get_num_cells(5)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_get_resolution_func =
-	    ScalarFunction("a5_get_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
-	loader.RegisterFunction(a5_get_resolution_func);
+	// a5_get_resolution: Returns the resolution of a cell
+	{
+		auto func = ScalarFunction("a5_get_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the resolution level (0-30) of an A5 cell";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_get_resolution(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_lon_lat_to_cell_func =
-	    ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-	                   LogicalType::UBIGINT, A5LonLatToCellFun);
-	loader.RegisterFunction(a5_lon_lat_to_cell_func);
+	// a5_lonlat_to_cell: Converts longitude/latitude to a cell
+	{
+		auto func = ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
+		                           LogicalType::UBIGINT, A5LonLatToCellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Converts a longitude/latitude coordinate to an A5 cell at the specified resolution";
+		desc.parameter_names = {"longitude", "latitude", "resolution"};
+		desc.parameter_types = {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER};
+		desc.examples = {"a5_lonlat_to_cell(-122.4194, 37.7749, 10)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_cell_to_parent_func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
-	                                             LogicalType::UBIGINT, A5CellToParentFun);
-	loader.RegisterFunction(a5_cell_to_parent_func);
+	// a5_cell_to_parent: Returns the parent cell at a given resolution
+	{
+		auto func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::UBIGINT,
+		                           A5CellToParentFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the parent A5 cell at the specified coarser resolution";
+		desc.parameter_names = {"cell", "parent_resolution"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc.examples = {"a5_cell_to_parent(a5_lonlat_to_cell(-122.4, 37.8, 10), 5)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_cell_to_lon_lat_func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT},
-	                                              LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
-	loader.RegisterFunction(a5_cell_to_lon_lat_func);
+	// a5_cell_to_lonlat: Returns the center longitude/latitude of a cell
+	{
+		auto func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT}, LogicalType::ARRAY(LogicalType::DOUBLE, 2),
+		                           A5CellToLonLatFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the center point [longitude, latitude] of an A5 cell";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_cell_to_lonlat(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_cell_to_children_set = ScalarFunctionSet("a5_cell_to_children");
-	a5_cell_to_children_set.AddFunction(ScalarFunction("a5_cell_to_children",
-	                                                   {LogicalType::UBIGINT, LogicalType::INTEGER},
-	                                                   LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
-	a5_cell_to_children_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT},
-	                                                   LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
-	loader.RegisterFunction(a5_cell_to_children_set);
+	// a5_cell_to_children: Returns child cells
+	{
+		ScalarFunctionSet func_set("a5_cell_to_children");
+		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+		CreateScalarFunctionInfo info(func_set);
 
-	auto a5_get_res0_cells_func =
-	    ScalarFunction("a5_get_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
-	loader.RegisterFunction(a5_get_res0_cells_func);
+		// Description for two-argument variant
+		FunctionDescription desc1;
+		desc1.description = "Returns all child A5 cells at the specified finer resolution";
+		desc1.parameter_names = {"cell", "child_resolution"};
+		desc1.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc1.examples = {"a5_cell_to_children(a5_lonlat_to_cell(-122.4, 37.8, 5), 6)"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
 
-	auto boundary_set = ScalarFunctionSet("a5_cell_to_boundary");
-	boundary_set.AddFunction(ScalarFunction(
-	    {LogicalType::UBIGINT}, LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
-	boundary_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN},
-	                                        LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
-	                                        A5CellToBoundaryFun));
-	boundary_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
-	                                        LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
-	                                        A5CellToBoundaryFun));
-	loader.RegisterFunction(boundary_set);
+		// Description for one-argument variant (immediate children)
+		FunctionDescription desc2;
+		desc2.description = "Returns the immediate child A5 cells (one resolution finer)";
+		desc2.parameter_names = {"cell"};
+		desc2.parameter_types = {LogicalType::UBIGINT};
+		desc2.examples = {"a5_cell_to_children(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
 
-	auto a5_cell_to_boundary_func =
-	    ScalarFunction("a5_cell_to_boundary", {LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
-	                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun);
-	loader.RegisterFunction(a5_cell_to_boundary_func);
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_compact_func = ScalarFunction("a5_compact", {LogicalType::LIST(LogicalType::UBIGINT)},
-	                                      LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
-	loader.RegisterFunction(a5_compact_func);
+	// a5_get_res0_cells: Returns all resolution 0 cells
+	{
+		auto func = ScalarFunction("a5_get_res0_cells", {}, LogicalType::LIST(LogicalType::UBIGINT), A5GetRes0CellsFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns all 12 resolution 0 (root) A5 cells covering the entire globe";
+		desc.parameter_names = {};
+		desc.parameter_types = {};
+		desc.examples = {"a5_get_res0_cells()"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
-	auto a5_uncompact_func =
-	    ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER},
-	                   LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
-	loader.RegisterFunction(a5_uncompact_func);
+	// a5_cell_to_boundary: Returns the boundary polygon vertices
+	{
+		ScalarFunctionSet func_set("a5_cell_to_boundary");
+		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT},
+		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
+		                                    A5CellToBoundaryFun));
+		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN},
+		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
+		                                    A5CellToBoundaryFun));
+		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
+		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
+		                                    A5CellToBoundaryFun));
+		CreateScalarFunctionInfo info(func_set);
+
+		// Description for one-argument variant
+		FunctionDescription desc1;
+		desc1.description = "Returns the boundary vertices of an A5 cell as a closed ring of [lon, lat] points";
+		desc1.parameter_names = {"cell"};
+		desc1.parameter_types = {LogicalType::UBIGINT};
+		desc1.examples = {"a5_cell_to_boundary(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
+
+		// Description for two-argument variant
+		FunctionDescription desc2;
+		desc2.description = "Returns the boundary vertices of an A5 cell, optionally as an open or closed ring";
+		desc2.parameter_names = {"cell", "closed_ring"};
+		desc2.parameter_types = {LogicalType::UBIGINT, LogicalType::BOOLEAN};
+		desc2.examples = {"a5_cell_to_boundary(a5_lonlat_to_cell(-122.4, 37.8, 5), false)"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
+
+		// Description for three-argument variant
+		FunctionDescription desc3;
+		desc3.description =
+		    "Returns the boundary vertices of an A5 cell with configurable ring closure and edge interpolation segments";
+		desc3.parameter_names = {"cell", "closed_ring", "segments"};
+		desc3.parameter_types = {LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER};
+		desc3.examples = {"a5_cell_to_boundary(a5_lonlat_to_cell(-122.4, 37.8, 5), true, 4)"};
+		desc3.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc3));
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_compact: Compacts a set of cells
+	{
+		auto func = ScalarFunction("a5_compact", {LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Compacts a list of A5 cells by merging complete sets of sibling cells into parent cells";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_compact(a5_cell_to_children(a5_lonlat_to_cell(-122.4, 37.8, 5)))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_uncompact: Uncompacts cells to a target resolution
+	{
+		auto func = ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Expands a compacted list of A5 cells to the specified target resolution";
+		desc.parameter_names = {"cells", "target_resolution"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER};
+		desc.examples = {"a5_uncompact([a5_lonlat_to_cell(-122.4, 37.8, 5)], 7)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
 
 	QueryFarmSendTelemetry(loader, "a5", "2025110601");
 }
