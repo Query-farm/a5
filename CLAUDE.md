@@ -16,10 +16,10 @@ This is a DuckDB extension that provides A5 geospatial indexing functions. A5 is
 ### Development Builds
 ```bash
 # Debug build (for development)
-make debug
+GEN=ninja make debug
 
 # Release build (optimized)
-make release
+GEN=ninja make release
 ```
 
 ### Testing
@@ -47,6 +47,8 @@ make format-fix
 # Clean build artifacts
 make clean
 ```
+
+All DuckDB extension function should be documented with CreateScalarFunctionInfo or CreateAggregateFunctionInfo or the appropriate type for the function.  This documentation of the function should include examples, parameter types and parameter names.  The function should be categorized.
 
 ## Architecture Details
 
