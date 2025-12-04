@@ -10,6 +10,7 @@
 namespace duckdb {
 
 #define MAX_RESOLUTION 30
+#define A5_EXTENSION_VERSION "2025120401"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -528,7 +529,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	QueryFarmSendTelemetry(loader, "a5", "2025110601");
+	QueryFarmSendTelemetry(loader, "a5", A5_EXTENSION_VERSION);
 }
 
 void A5Extension::Load(ExtensionLoader &loader) {
@@ -539,7 +540,7 @@ std::string A5Extension::Name() {
 }
 
 std::string A5Extension::Version() const {
-	return "2025110601";
+	return A5_EXTENSION_VERSION;
 }
 
 } // namespace duckdb
