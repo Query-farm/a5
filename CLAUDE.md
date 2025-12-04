@@ -50,6 +50,8 @@ make clean
 
 All DuckDB extension function should be documented with CreateScalarFunctionInfo or CreateAggregateFunctionInfo or the appropriate type for the function.  This documentation of the function should include examples, parameter types and parameter names.  The function should be categorized.
 
+When making changes the version should always be updated to the current date plus an ordinal counter in the form of YYYYMMDDCC.
+
 ## Architecture Details
 
 ### FFI Layer (Rust ↔ C++)
