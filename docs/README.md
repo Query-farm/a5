@@ -312,6 +312,59 @@ SELECT unnest(a5_cell_to_boundary(207618739568, false, 5)) as boundary_points;
 
 
 
+#### `a5_cell_to_spherical(cell_id) -> DOUBLE[2]`
+
+Returns the spherical coordinates [theta, phi] in radians of an A5 cell center, where theta is the azimuthal angle and phi is the polar angle.
+
+**Example:**
+```sql
+SELECT a5_cell_to_spherical(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as spherical_coords;
+```
+
+### Traversal Functions
+
+#### `a5_grid_disk(cell_id, k) -> UBIGINT[]`
+
+Returns all A5 cells within `k` edge-steps of the given cell (edge adjacency).
+
+**Parameters:**
+
+- `cell_id` (UBIGINT): The center A5 cell
+- `k` (INTEGER): Number of edge-steps (must be >= 0)
+
+**Example:**
+```sql
+SELECT a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1) as neighbors;
+```
+
+#### `a5_grid_disk_vertex(cell_id, k) -> UBIGINT[]`
+
+Returns all A5 cells within `k` vertex-steps of the given cell (vertex adjacency). This returns more cells than `a5_grid_disk` at the same `k` because vertex adjacency includes cells that share only a vertex.
+
+**Parameters:**
+
+- `cell_id` (UBIGINT): The center A5 cell
+- `k` (INTEGER): Number of vertex-steps (must be >= 0)
+
+**Example:**
+```sql
+SELECT a5_grid_disk_vertex(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1) as neighbors;
+```
+
+#### `a5_spherical_cap(cell_id, radius) -> UBIGINT[]`
+
+Returns all A5 cells within the specified radius (in meters) of the given cell.
+
+**Parameters:**
+
+- `cell_id` (UBIGINT): The center A5 cell
+- `radius` (DOUBLE): Radius in meters
+
+**Example:**
+```sql
+SELECT a5_spherical_cap(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 5000.0) as nearby_cells;
+```
+
 ### Utility Functions
 
 #### `a5_get_num_cells(resolution) -> UBIGINT`
@@ -355,6 +408,51 @@ SELECT unnest(a5_get_res0_cells()) as base_cells;
 ├─────────────────────┤
 │       12 rows       │
 └─────────────────────┘
+```
+
+#### `a5_hex_to_u64(hex) -> UBIGINT`
+
+Converts an A5 hex string representation to a UBIGINT cell ID.
+
+**Example:**
+```sql
+SELECT a5_hex_to_u64('1600000000000000') as cell_id;
+┌─────────────────────┐
+│       cell_id       │
+│       uint64        │
+├─────────────────────┤
+│ 1585267068834414592 │
+└─────────────────────┘
+```
+
+#### `a5_u64_to_hex(cell_id) -> VARCHAR`
+
+Converts a UBIGINT A5 cell ID to its hex string representation.
+
+**Example:**
+```sql
+SELECT a5_u64_to_hex(1585267068834414592::ubigint) as hex_id;
+┌──────────────────┐
+│      hex_id      │
+│     varchar      │
+├──────────────────┤
+│ 1600000000000000 │
+└──────────────────┘
+```
+
+#### `a5_get_num_children(parent_resolution, child_resolution) -> UBIGINT`
+
+Returns the number of child cells at `child_resolution` that fit within a single cell at `parent_resolution`.
+
+**Example:**
+```sql
+SELECT a5_get_num_children(0, 1) as num_children;
+┌──────────────┐
+│ num_children │
+│    uint64    │
+├──────────────┤
+│            5 │
+└──────────────┘
 ```
 
 #### `a5_compact(cell_ids) -> UBIGINT[]`
