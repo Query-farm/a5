@@ -9,8 +9,8 @@
 #include "query_farm_telemetry.hpp"
 namespace duckdb {
 
-#define MAX_RESOLUTION 30
-#define A5_EXTENSION_VERSION "2025120401"
+#define MAX_RESOLUTION       30
+#define A5_EXTENSION_VERSION "2026030801"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -322,6 +322,164 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 	    });
 }
 
+inline void A5HexToU64Fun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &hex_vector = args.data[0];
+	UnaryExecutor::Execute<string_t, uint64_t>(hex_vector, result, args.size(), [&](string_t hex) {
+		struct ResultU64 res = a5_hex_to_u64(hex.GetString().c_str());
+		ThrowRustError(res.error, "a5_hex_to_u64");
+		return res.value;
+	});
+}
+
+inline void A5U64ToHexFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_vector = args.data[0];
+
+	UnifiedVectorFormat cell_format;
+	cell_vector.ToUnifiedFormat(args.size(), cell_format);
+	auto input_data = UnifiedVectorFormat::GetData<uint64_t>(cell_format);
+
+	for (idx_t i = 0; i < args.size(); i++) {
+		auto idx = cell_format.sel->get_index(i);
+		if (!cell_format.validity.RowIsValid(idx)) {
+			FlatVector::SetNull(result, i, true);
+			continue;
+		}
+		char *hex_ptr = a5_u64_to_hex(input_data[idx]);
+		string hex_str(hex_ptr);
+		a5_free_string(hex_ptr);
+		FlatVector::GetData<string_t>(result)[i] = StringVector::AddString(result, hex_str);
+	}
+
+	if (args.size() == 1) {
+		result.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+}
+
+inline void A5GetNumChildrenFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &parent_res_vector = args.data[0];
+	auto &child_res_vector = args.data[1];
+
+	BinaryExecutor::Execute<int32_t, int32_t, uint64_t>(
+	    parent_res_vector, child_res_vector, result, args.size(), [&](int32_t parent_res, int32_t child_res) {
+		    ValidateResolution(parent_res, "a5_get_num_children");
+		    ValidateResolution(child_res, "a5_get_num_children");
+		    return static_cast<uint64_t>(a5_get_num_children(parent_res, child_res));
+	    });
+}
+
+inline void A5CellToSphericalFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cell_vector = args.data[0];
+
+	auto &result_data_children = ArrayVector::GetEntry(result);
+	double *data_ptr = FlatVector::GetData<double>(result_data_children);
+
+	UnifiedVectorFormat cell_id_format;
+	cell_vector.ToUnifiedFormat(args.size(), cell_id_format);
+	uint64_t *input_data_ptr = FlatVector::GetData<uint64_t>(cell_vector);
+
+	for (idx_t i = 0; i < args.size(); i++) {
+		auto cell_idx = cell_id_format.sel->get_index(i);
+		if (!cell_id_format.validity.RowIsValid(cell_idx)) {
+			FlatVector::SetNull(result, i, true);
+			continue;
+		}
+
+		struct ResultSpherical res = a5_cell_to_spherical(input_data_ptr[cell_idx]);
+		ThrowRustError(res.error, "a5_cell_to_spherical");
+
+		data_ptr[i * 2] = res.theta;
+		data_ptr[i * 2 + 1] = res.phi;
+	}
+
+	if (args.size() == 1) {
+		result.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+}
+
+inline void A5SphericalCapFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto &cell_vector = args.data[0];
+	auto &radius_vector = args.data[1];
+
+	BinaryExecutor::Execute<uint64_t, double, list_entry_t>(
+	    cell_vector, radius_vector, result, args.size(), [&](uint64_t cell_id, double radius) {
+		    auto cap_result = a5_spherical_cap(cell_id, radius);
+		    ThrowCellArrayError(cap_result, "a5_spherical_cap");
+
+		    if (cap_result.len == 0) {
+			    a5_free_cell_array(cap_result);
+			    return list_entry_t {0, 0};
+		    }
+		    for (size_t i = 0; i < cap_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(cap_result.data[i]));
+		    }
+		    list_entry_t out {offset, cap_result.len};
+		    offset += cap_result.len;
+		    a5_free_cell_array(cap_result);
+		    return out;
+	    });
+}
+
+inline void A5GridDiskFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto &cell_vector = args.data[0];
+	auto &k_vector = args.data[1];
+
+	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
+	    cell_vector, k_vector, result, args.size(), [&](uint64_t cell_id, int32_t k) {
+		    if (k < 0) {
+			    throw InvalidInputException("a5_grid_disk: k must be >= 0");
+		    }
+		    auto disk_result = a5_grid_disk(cell_id, static_cast<uintptr_t>(k));
+		    ThrowCellArrayError(disk_result, "a5_grid_disk");
+
+		    if (disk_result.len == 0) {
+			    a5_free_cell_array(disk_result);
+			    return list_entry_t {0, 0};
+		    }
+		    for (size_t i = 0; i < disk_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(disk_result.data[i]));
+		    }
+		    list_entry_t out {offset, disk_result.len};
+		    offset += disk_result.len;
+		    a5_free_cell_array(disk_result);
+		    return out;
+	    });
+}
+
+inline void A5GridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto &cell_vector = args.data[0];
+	auto &k_vector = args.data[1];
+
+	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
+	    cell_vector, k_vector, result, args.size(), [&](uint64_t cell_id, int32_t k) {
+		    if (k < 0) {
+			    throw InvalidInputException("a5_grid_disk_vertex: k must be >= 0");
+		    }
+		    auto disk_result = a5_grid_disk_vertex(cell_id, static_cast<uintptr_t>(k));
+		    ThrowCellArrayError(disk_result, "a5_grid_disk_vertex");
+
+		    if (disk_result.len == 0) {
+			    a5_free_cell_array(disk_result);
+			    return list_entry_t {0, 0};
+		    }
+		    for (size_t i = 0; i < disk_result.len; i++) {
+			    ListVector::PushBack(result, Value::UBIGINT(disk_result.data[i]));
+		    }
+		    list_entry_t out {offset, disk_result.len};
+		    offset += disk_result.len;
+		    a5_free_cell_array(disk_result);
+		    return out;
+	    });
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_area: Returns the area of a cell at a given resolution
 	{
@@ -353,7 +511,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_get_resolution: Returns the resolution of a cell
 	{
-		auto func = ScalarFunction("a5_get_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
+		auto func =
+		    ScalarFunction("a5_get_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the resolution level (0-30) of an A5 cell";
@@ -367,8 +526,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_lonlat_to_cell: Converts longitude/latitude to a cell
 	{
-		auto func = ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-		                           LogicalType::UBIGINT, A5LonLatToCellFun);
+		auto func =
+		    ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
+		                   LogicalType::UBIGINT, A5LonLatToCellFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Converts a longitude/latitude coordinate to an A5 cell at the specified resolution";
@@ -382,8 +542,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_parent: Returns the parent cell at a given resolution
 	{
-		auto func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::UBIGINT,
-		                           A5CellToParentFun);
+		auto func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::UBIGINT, A5CellToParentFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the parent A5 cell at the specified coarser resolution";
@@ -397,8 +557,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_lonlat: Returns the center longitude/latitude of a cell
 	{
-		auto func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT}, LogicalType::ARRAY(LogicalType::DOUBLE, 2),
-		                           A5CellToLonLatFun);
+		auto func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT},
+		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the center point [longitude, latitude] of an A5 cell";
@@ -488,8 +648,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 		// Description for three-argument variant
 		FunctionDescription desc3;
-		desc3.description =
-		    "Returns the boundary vertices of an A5 cell with configurable ring closure and edge interpolation segments";
+		desc3.description = "Returns the boundary vertices of an A5 cell with configurable ring closure and edge "
+		                    "interpolation segments";
 		desc3.parameter_names = {"cell", "closed_ring", "segments"};
 		desc3.parameter_types = {LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER};
 		desc3.examples = {"a5_cell_to_boundary(a5_lonlat_to_cell(-122.4, 37.8, 5), true, 4)"};
@@ -524,6 +684,110 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"cells", "target_resolution"};
 		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER};
 		desc.examples = {"a5_uncompact([a5_lonlat_to_cell(-122.4, 37.8, 5)], 7)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_hex_to_u64: Converts a hex string to a u64 cell ID
+	{
+		auto func = ScalarFunction("a5_hex_to_u64", {LogicalType::VARCHAR}, LogicalType::UBIGINT, A5HexToU64Fun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Converts an A5 hex string representation to a UBIGINT cell ID";
+		desc.parameter_names = {"hex"};
+		desc.parameter_types = {LogicalType::VARCHAR};
+		desc.examples = {"a5_hex_to_u64('1600000000000000')"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_u64_to_hex: Converts a u64 cell ID to a hex string
+	{
+		auto func = ScalarFunction("a5_u64_to_hex", {LogicalType::UBIGINT}, LogicalType::VARCHAR, A5U64ToHexFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Converts a UBIGINT A5 cell ID to its hex string representation";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_u64_to_hex(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_get_num_children: Returns the number of children between two resolutions
+	{
+		auto func = ScalarFunction("a5_get_num_children", {LogicalType::INTEGER, LogicalType::INTEGER},
+		                           LogicalType::UBIGINT, A5GetNumChildrenFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description =
+		    "Returns the number of child cells at child_resolution that fit within a cell at parent_resolution";
+		desc.parameter_names = {"parent_resolution", "child_resolution"};
+		desc.parameter_types = {LogicalType::INTEGER, LogicalType::INTEGER};
+		desc.examples = {"a5_get_num_children(0, 1)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_to_spherical: Returns the spherical coordinates of a cell center
+	{
+		auto func = ScalarFunction("a5_cell_to_spherical", {LogicalType::UBIGINT},
+		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToSphericalFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the spherical coordinates [theta, phi] in radians of an A5 cell center";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_spherical_cap: Returns cells within a spherical cap radius
+	{
+		auto func = ScalarFunction("a5_spherical_cap", {LogicalType::UBIGINT, LogicalType::DOUBLE},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5SphericalCapFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns all A5 cells within the specified radius (in meters) of the given cell";
+		desc.parameter_names = {"cell", "radius"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::DOUBLE};
+		desc.examples = {"a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 1000.0)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_grid_disk: Returns cells within k edge-distance of the given cell
+	{
+		auto func = ScalarFunction("a5_grid_disk", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns all A5 cells within k edge-steps of the given cell (edge adjacency)";
+		desc.parameter_names = {"cell", "k"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc.examples = {"a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_grid_disk_vertex: Returns cells within k vertex-distance of the given cell
+	{
+		auto func = ScalarFunction("a5_grid_disk_vertex", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskVertexFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns all A5 cells within k vertex-steps of the given cell (vertex adjacency)";
+		desc.parameter_names = {"cell", "k"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc.examples = {"a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));

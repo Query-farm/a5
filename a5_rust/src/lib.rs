@@ -1,5 +1,5 @@
 use a5;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 
 #[repr(C)]
 pub struct ResultU64 {
@@ -12,6 +12,13 @@ pub struct ResultLonLat {
     pub longitude: f64,
     pub latitude: f64,
     pub error: *mut std::os::raw::c_char, // null if no error
+}
+
+#[repr(C)]
+pub struct ResultSpherical {
+    pub theta: f64,
+    pub phi: f64,
+    pub error: *mut std::os::raw::c_char,
 }
 
 #[repr(C)]
@@ -201,5 +208,72 @@ pub extern "C" fn a5_uncompact(cells: *const u64, len: usize, target_resolution:
     }
     let cell_slice = unsafe { std::slice::from_raw_parts(cells, len) };
     cell_vec_result_to_c(a5::uncompact(cell_slice, target_resolution))
+}
+
+#[no_mangle]
+pub extern "C" fn a5_free_string(ptr: *mut std::os::raw::c_char) {
+    if !ptr.is_null() {
+        unsafe { drop(CString::from_raw(ptr)); }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn a5_hex_to_u64(hex: *const std::os::raw::c_char) -> ResultU64 {
+    if hex.is_null() {
+        let err_msg = CString::new("hex string is null").unwrap();
+        return ResultU64 { value: 0, error: err_msg.into_raw() };
+    }
+    let c_str = unsafe { CStr::from_ptr(hex) };
+    let hex_str = match c_str.to_str() {
+        Ok(s) => s,
+        Err(e) => {
+            let err_msg = CString::new(e.to_string()).unwrap();
+            return ResultU64 { value: 0, error: err_msg.into_raw() };
+        }
+    };
+    match a5::hex_to_u64(hex_str) {
+        Ok(value) => ResultU64 { value, error: std::ptr::null_mut() },
+        Err(e) => {
+            let err_msg = CString::new(e.to_string()).unwrap();
+            ResultU64 { value: 0, error: err_msg.into_raw() }
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn a5_u64_to_hex(value: u64) -> *mut std::os::raw::c_char {
+    let hex = a5::u64_to_hex(value);
+    CString::new(hex).unwrap().into_raw()
+}
+
+#[no_mangle]
+pub extern "C" fn a5_get_num_children(parent_res: i32, child_res: i32) -> usize {
+    a5::get_num_children(parent_res, child_res)
+}
+
+#[no_mangle]
+pub extern "C" fn a5_cell_to_spherical(cell: u64) -> ResultSpherical {
+    match a5::cell_to_spherical(cell) {
+        Ok(sph) => ResultSpherical { theta: sph.theta.get(), phi: sph.phi.get(), error: std::ptr::null_mut() },
+        Err(e) => {
+            let err_msg = CString::new(e.to_string()).unwrap();
+            ResultSpherical { theta: 0.0, phi: 0.0, error: err_msg.into_raw() }
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn a5_spherical_cap(cell_id: u64, radius: f64) -> CellArray {
+    cell_vec_result_to_c(a5::spherical_cap(cell_id, radius))
+}
+
+#[no_mangle]
+pub extern "C" fn a5_grid_disk(cell_id: u64, k: usize) -> CellArray {
+    cell_vec_result_to_c(a5::grid_disk(cell_id, k))
+}
+
+#[no_mangle]
+pub extern "C" fn a5_grid_disk_vertex(cell_id: u64, k: usize) -> CellArray {
+    cell_vec_result_to_c(a5::grid_disk_vertex(cell_id, k))
 }
 
