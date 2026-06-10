@@ -277,3 +277,56 @@ pub extern "C" fn a5_grid_disk_vertex(cell_id: u64, k: usize) -> CellArray {
     cell_vec_result_to_c(a5::grid_disk_vertex(cell_id, k))
 }
 
+#[no_mangle]
+pub extern "C" fn a5_world_cell() -> u64 {
+    a5::WORLD_CELL
+}
+
+// A cell ID is valid iff it decodes and re-encodes to itself. `deserialize` alone is too
+// lenient (it ignores non-canonical low/marker bits), so we check the full round-trip.
+#[no_mangle]
+pub extern "C" fn a5_is_valid_cell(index: u64) -> bool {
+    match a5::core::serialization::deserialize(index) {
+        Ok(cell) => a5::core::serialization::serialize(&cell)
+            .map(|reencoded| reencoded == index)
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn a5_spherical_to_cell(theta: f64, phi: f64, resolution: i32) -> ResultU64 {
+    let spherical = a5::coordinate_systems::Spherical::new(a5::Radians::new(theta), a5::Radians::new(phi));
+    match a5::spherical_to_cell(spherical, resolution) {
+        Ok(cell) => ResultU64 { value: cell, error: std::ptr::null_mut() },
+        Err(e) => {
+            let err_msg = CString::new(e.to_string()).unwrap();
+            ResultU64 { value: 0, error: err_msg.into_raw() }
+        }
+    }
+}
+
+// Build a Vec<a5::LonLat> from a C array of LonLatDegrees (lon, lat) input points.
+fn lonlat_slice_to_vec(points: *const LonLatDegrees, len: usize) -> Vec<a5::LonLat> {
+    let slice = unsafe { std::slice::from_raw_parts(points, len) };
+    slice.iter().map(|p| a5::LonLat::new(p.lon, p.lat)).collect()
+}
+
+#[no_mangle]
+pub extern "C" fn a5_line_string_to_cells(points: *const LonLatDegrees, len: usize, resolution: i32) -> CellArray {
+    if points.is_null() || len == 0 {
+        return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
+    }
+    let lonlats = lonlat_slice_to_vec(points, len);
+    cell_vec_result_to_c(a5::line_string_to_cells(&lonlats, resolution))
+}
+
+#[no_mangle]
+pub extern "C" fn a5_polygon_to_cells(points: *const LonLatDegrees, len: usize, resolution: i32) -> CellArray {
+    if points.is_null() || len == 0 {
+        return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
+    }
+    let lonlats = lonlat_slice_to_vec(points, len);
+    cell_vec_result_to_c(a5::polygon_to_cells(&lonlats, resolution))
+}
+
