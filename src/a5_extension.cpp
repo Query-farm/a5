@@ -5,12 +5,14 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/function/scalar_function.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
+#include "duckdb/common/types/geometry.hpp"
 #include "rust.h"
 #include "query_farm_telemetry.hpp"
+#include <unordered_set>
 namespace duckdb {
 
 #define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026031101"
+#define A5_EXTENSION_VERSION "2026060904"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -480,6 +482,334 @@ inline void A5GridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector 
 	    });
 }
 
+inline void A5WorldCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	D_ASSERT(args.ColumnCount() == 0);
+	result.Reference(Value::UBIGINT(a5_world_cell()));
+}
+
+inline void A5IsValidCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
+	                                       [&](uint64_t cell) { return a5_is_valid_cell(cell); });
+}
+
+inline void A5SphericalToCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &theta_vector = args.data[0];
+	auto &phi_vector = args.data[1];
+	auto &resolution_vector = args.data[2];
+
+	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
+	    theta_vector, phi_vector, resolution_vector, result, args.size(),
+	    [&](double theta, double phi, int32_t resolution) {
+		    ValidateResolution(resolution, "a5_spherical_to_cell");
+		    struct ResultU64 res = a5_spherical_to_cell(theta, phi, resolution);
+		    ThrowRustError(res.error, "a5_spherical_to_cell");
+		    return res.value;
+	    });
+}
+
+// ---------------------------------------------------------------------------
+// GEOMETRY (WKB) writers
+//
+// DuckDB stores GEOMETRY values as plain little-endian ISO WKB (st_geomfromwkb /
+// st_aswkb are passthroughs), so we emit standard WKB directly. These helpers
+// append native-endian bytes; DuckDB only supports little-endian WKB and runs on
+// little-endian platforms.
+// ---------------------------------------------------------------------------
+static void WkbAppendU8(string &buf, uint8_t v) {
+	buf.push_back(static_cast<char>(v));
+}
+static void WkbAppendU32(string &buf, uint32_t v) {
+	buf.append(reinterpret_cast<const char *>(&v), sizeof(v));
+}
+static void WkbAppendF64(string &buf, double v) {
+	buf.append(reinterpret_cast<const char *>(&v), sizeof(v));
+}
+
+// a5_cell_to_geometry: returns the cell pentagon as a POLYGON GEOMETRY.
+inline void A5CellToGeometryFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto build = [&](uint64_t cell_id, int32_t segments) -> string_t {
+		CellBoundaryOptions options;
+		options.closed_ring = true; // a POLYGON ring must be closed
+		options.segments = segments;
+
+		auto boundary = a5_cell_to_boundary(cell_id, options);
+		ThrowLonLatArrayError(boundary, "a5_cell_to_geometry");
+
+		string buf;
+		WkbAppendU8(buf, 1); // little-endian
+		WkbAppendU32(buf, static_cast<uint32_t>(GeometryType::POLYGON));
+		if (boundary.len == 0) {
+			WkbAppendU32(buf, 0); // POLYGON EMPTY (e.g. the world cell)
+		} else {
+			WkbAppendU32(buf, 1);                                   // ring count
+			WkbAppendU32(buf, static_cast<uint32_t>(boundary.len)); // vertex count
+			for (size_t i = 0; i < boundary.len; i++) {
+				WkbAppendF64(buf, boundary.data[i].lon);
+				WkbAppendF64(buf, boundary.data[i].lat);
+			}
+		}
+		a5_free_lonlatdegrees_array(boundary);
+		return StringVector::AddStringOrBlob(result, buf.data(), buf.size());
+	};
+
+	if (args.ColumnCount() == 1) {
+		UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result, args.size(),
+		                                           [&](uint64_t cell_id) { return build(cell_id, -1); });
+	} else {
+		BinaryExecutor::Execute<uint64_t, int32_t, string_t>(
+		    args.data[0], args.data[1], result, args.size(),
+		    [&](uint64_t cell_id, int32_t segments) { return build(cell_id, segments <= 0 ? -1 : segments); });
+	}
+}
+
+// a5_cell_to_point: returns the cell center as a POINT GEOMETRY.
+inline void A5CellToPointFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result, args.size(), [&](uint64_t cell_id) {
+		struct ResultLonLat ll = a5_cell_to_lon_lat(cell_id);
+		ThrowRustError(ll.error, "a5_cell_to_point");
+		string buf;
+		WkbAppendU8(buf, 1);
+		WkbAppendU32(buf, static_cast<uint32_t>(GeometryType::POINT));
+		WkbAppendF64(buf, ll.longitude);
+		WkbAppendF64(buf, ll.latitude);
+		return StringVector::AddStringOrBlob(result, buf.data(), buf.size());
+	});
+}
+
+// ---------------------------------------------------------------------------
+// GEOMETRY (WKB) reader -> A5 cells
+// ---------------------------------------------------------------------------
+
+// Ordered, de-duplicated accumulator of cell IDs.
+struct CellAccumulator {
+	vector<uint64_t> cells;
+	std::unordered_set<uint64_t> seen;
+	void Add(uint64_t cell) {
+		if (seen.insert(cell).second) {
+			cells.push_back(cell);
+		}
+	}
+};
+
+// Cursor over the little-endian ISO WKB bytes of a GEOMETRY value.
+struct WkbCursor {
+	const char *ptr;
+	idx_t size;
+	idx_t pos;
+	const char *function_name;
+
+	void Require(idx_t n) {
+		if (pos + n > size) {
+			throw InvalidInputException(string(function_name) + ": malformed GEOMETRY (truncated WKB)");
+		}
+	}
+	uint8_t U8() {
+		Require(1);
+		return static_cast<uint8_t>(ptr[pos++]);
+	}
+	uint32_t U32() {
+		Require(4);
+		uint32_t v;
+		memcpy(&v, ptr + pos, sizeof(v));
+		pos += 4;
+		return v;
+	}
+	double F64() {
+		Require(8);
+		double v;
+		memcpy(&v, ptr + pos, sizeof(v));
+		pos += 8;
+		return v;
+	}
+};
+
+// Read one ring of `dims`-dimensional vertices as [lon, lat] points (Z/M skipped).
+static vector<LonLatDegrees> WkbReadRing(WkbCursor &cur, idx_t dims) {
+	uint32_t vert_count = cur.U32();
+	vector<LonLatDegrees> ring;
+	ring.reserve(vert_count);
+	for (uint32_t i = 0; i < vert_count; i++) {
+		double lon = cur.F64();
+		double lat = cur.F64();
+		for (idx_t d = 2; d < dims; d++) {
+			cur.F64(); // skip Z / M
+		}
+		ring.push_back(LonLatDegrees {lon, lat});
+	}
+	return ring;
+}
+
+// Fill a polygon (outer ring minus any holes) into the accumulator.
+//
+// A5's polygon_to_cells returns a *compacted* (mixed-resolution) covering, so the outer
+// covering and a hole's covering generally share no cell IDs and cannot be differenced
+// directly. To subtract holes we uncompact both to the target resolution, take the set
+// difference at that uniform resolution, then re-compact for output. The (common) no-hole
+// case skips all of this and passes the crate's compacted covering through unchanged.
+static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, CellAccumulator &acc,
+                                const char *function_name) {
+	if (rings.empty() || rings[0].empty()) {
+		return;
+	}
+	auto outer = a5_polygon_to_cells(rings[0].data(), rings[0].size(), resolution);
+	ThrowCellArrayError(outer, function_name);
+
+	bool has_holes = false;
+	for (size_t r = 1; r < rings.size(); r++) {
+		if (!rings[r].empty()) {
+			has_holes = true;
+			break;
+		}
+	}
+	if (!has_holes) {
+		for (size_t i = 0; i < outer.len; i++) {
+			acc.Add(outer.data[i]);
+		}
+		a5_free_cell_array(outer);
+		return;
+	}
+
+	// Expand the outer covering to a uniform resolution.
+	auto outer_uniform = a5_uncompact(outer.data, outer.len, resolution);
+	ThrowCellArrayError(outer_uniform, function_name);
+	a5_free_cell_array(outer);
+
+	// Collect the uniform-resolution cells of every hole.
+	std::unordered_set<uint64_t> holes;
+	for (size_t r = 1; r < rings.size(); r++) {
+		if (rings[r].empty()) {
+			continue;
+		}
+		auto hole = a5_polygon_to_cells(rings[r].data(), rings[r].size(), resolution);
+		ThrowCellArrayError(hole, function_name);
+		auto hole_uniform = a5_uncompact(hole.data, hole.len, resolution);
+		ThrowCellArrayError(hole_uniform, function_name);
+		a5_free_cell_array(hole);
+		for (size_t i = 0; i < hole_uniform.len; i++) {
+			holes.insert(hole_uniform.data[i]);
+		}
+		a5_free_cell_array(hole_uniform);
+	}
+
+	// Difference, then re-compact so the output matches the no-hole convention.
+	vector<uint64_t> kept;
+	kept.reserve(outer_uniform.len);
+	for (size_t i = 0; i < outer_uniform.len; i++) {
+		if (holes.find(outer_uniform.data[i]) == holes.end()) {
+			kept.push_back(outer_uniform.data[i]);
+		}
+	}
+	a5_free_cell_array(outer_uniform);
+	if (kept.empty()) {
+		return;
+	}
+	auto compacted = a5_compact(kept.data(), kept.size());
+	ThrowCellArrayError(compacted, function_name);
+	for (size_t i = 0; i < compacted.len; i++) {
+		acc.Add(compacted.data[i]);
+	}
+	a5_free_cell_array(compacted);
+}
+
+// Recursively read a (possibly multi-part) geometry and accumulate its A5 cells.
+// Each MULTI* / GEOMETRYCOLLECTION part carries its own WKB header, so we recurse.
+static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccumulator &acc, int depth) {
+	if (depth > 16) {
+		throw InvalidInputException(string(cur.function_name) + ": GEOMETRY nesting too deep");
+	}
+	uint8_t byte_order = cur.U8();
+	if (byte_order != 1) {
+		throw InvalidInputException(string(cur.function_name) + ": only little-endian WKB GEOMETRY is supported");
+	}
+	uint32_t meta = cur.U32();
+	uint32_t type_id = meta % 1000;
+	uint32_t flag = meta / 1000;
+	idx_t dims = 2 + ((flag & 0x01) ? 1 : 0) + ((flag & 0x02) ? 1 : 0);
+
+	switch (static_cast<GeometryType>(type_id)) {
+	case GeometryType::POINT: {
+		double lon = cur.F64();
+		double lat = cur.F64();
+		for (idx_t d = 2; d < dims; d++) {
+			cur.F64();
+		}
+		// Skip empty points, which WKB encodes as all-NaN coordinates.
+		if (!(lon != lon && lat != lat)) {
+			struct ResultU64 res = a5_lon_lat_to_cell(lon, lat, resolution);
+			ThrowRustError(res.error, cur.function_name);
+			acc.Add(res.value);
+		}
+		break;
+	}
+	case GeometryType::LINESTRING: {
+		auto ring = WkbReadRing(cur, dims);
+		if (!ring.empty()) {
+			auto cells = a5_line_string_to_cells(ring.data(), ring.size(), resolution);
+			ThrowCellArrayError(cells, cur.function_name);
+			for (size_t i = 0; i < cells.len; i++) {
+				acc.Add(cells.data[i]);
+			}
+			a5_free_cell_array(cells);
+		}
+		break;
+	}
+	case GeometryType::POLYGON: {
+		uint32_t ring_count = cur.U32();
+		vector<vector<LonLatDegrees>> rings;
+		rings.reserve(ring_count);
+		for (uint32_t r = 0; r < ring_count; r++) {
+			rings.push_back(WkbReadRing(cur, dims));
+		}
+		PolygonRingsToCells(rings, resolution, acc, cur.function_name);
+		break;
+	}
+	case GeometryType::MULTIPOINT:
+	case GeometryType::MULTILINESTRING:
+	case GeometryType::MULTIPOLYGON:
+	case GeometryType::GEOMETRYCOLLECTION: {
+		uint32_t part_count = cur.U32();
+		for (uint32_t p = 0; p < part_count; p++) {
+			WkbReadGeometryToCells(cur, resolution, acc, depth + 1);
+		}
+		break;
+	}
+	default:
+		throw InvalidInputException(string(cur.function_name) + ": unsupported GEOMETRY type");
+	}
+}
+
+// Append an accumulator's cells to the result list vector.
+static list_entry_t PushCells(Vector &result, uint64_t &offset, idx_t &result_size, const vector<uint64_t> &cells) {
+	if (cells.empty()) {
+		return list_entry_t {offset, 0};
+	}
+	ListVector::Reserve(result, result_size + cells.size());
+	for (auto cell : cells) {
+		ListVector::PushBack(result, Value::UBIGINT(cell));
+	}
+	result_size += cells.size();
+	list_entry_t out {offset, cells.size()};
+	offset += cells.size();
+	return out;
+}
+
+// a5_geometry_to_cells: run any GEOMETRY through the recursive WKB reader, accumulating its cells.
+inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	static const char *function_name = "a5_geometry_to_cells";
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+	idx_t result_size = ListVector::GetListSize(result);
+
+	BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
+	    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+		    ValidateResolution(resolution, function_name);
+		    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
+		    CellAccumulator acc;
+		    WkbReadGeometryToCells(cur, resolution, acc, 0);
+		    return PushCells(result, offset, result_size, acc.cells);
+	    });
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_area: Returns the area of a cell at a given resolution
 	{
@@ -788,6 +1118,114 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"cell", "k"};
 		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
 		desc.examples = {"a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_world_cell: Returns the A5 world cell (the root cell covering the entire globe)
+	{
+		auto func = ScalarFunction("a5_world_cell", {}, LogicalType::UBIGINT, A5WorldCellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the A5 world cell, the root cell that covers the entire globe and is the "
+		                   "ancestor of all resolution-0 cells";
+		desc.parameter_names = {};
+		desc.parameter_types = {};
+		desc.examples = {"a5_world_cell()"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_is_valid_cell: Returns whether a value is a valid A5 cell ID
+	{
+		auto func = ScalarFunction("a5_is_valid_cell", {LogicalType::UBIGINT}, LogicalType::BOOLEAN, A5IsValidCellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns true if the value is a valid A5 cell ID (a canonically-encoded cell). The world "
+		                   "cell (0) is considered valid";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_is_valid_cell(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_spherical_to_cell: Returns the cell containing the given spherical coordinates
+	{
+		auto func =
+		    ScalarFunction("a5_spherical_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
+		                   LogicalType::UBIGINT, A5SphericalToCellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the A5 cell at the given resolution containing the spherical coordinates "
+		                   "[theta, phi] (in radians); the inverse of a5_cell_to_spherical";
+		desc.parameter_names = {"theta", "phi", "resolution"};
+		desc.parameter_types = {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER};
+		desc.examples = {"a5_spherical_to_cell(2.14, 0.92, 10)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_geometry_to_cells: Returns the cells covering any geometry
+	{
+		auto func = ScalarFunction("a5_geometry_to_cells", {LogicalType::GEOMETRY(), LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
+		                   "their containing cell, lines are traced, and polygons are filled (holes excluded); MULTI* "
+		                   "and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are compacted - use "
+		                   "a5_uncompact to expand to a uniform resolution";
+		desc.parameter_names = {"geom", "resolution"};
+		desc.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
+		desc.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_to_geometry: Returns the cell pentagon as a POLYGON geometry
+	{
+		ScalarFunctionSet func_set("a5_cell_to_geometry");
+		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		func_set.AddFunction(
+		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		CreateScalarFunctionInfo info(func_set);
+
+		FunctionDescription desc1;
+		desc1.description = "Returns an A5 cell as a POLYGON geometry of its boundary";
+		desc1.parameter_names = {"cell"};
+		desc1.parameter_types = {LogicalType::UBIGINT};
+		desc1.examples = {"a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
+
+		FunctionDescription desc2;
+		desc2.description = "Returns an A5 cell as a POLYGON geometry, with each edge interpolated into the given "
+		                    "number of segments";
+		desc2.parameter_names = {"cell", "segments"};
+		desc2.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc2.examples = {"a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5), 4)"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
+
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_to_point: Returns the cell center as a POINT geometry
+	{
+		auto func =
+		    ScalarFunction("a5_cell_to_point", {LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToPointFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the center of an A5 cell as a POINT geometry";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_cell_to_point(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));

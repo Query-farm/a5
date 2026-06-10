@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "a5"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32328670c3644fbc39340a41fef1b891e1635cab53fd75e894c6be0bcf562fb0"
+checksum = "810fd8faa0a83f71c3b7f5ecbb9918f98e71afc127736c06245bc5f2686f1df2"
 dependencies = [
  "lazy_static",
 ]

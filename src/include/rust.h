@@ -92,4 +92,14 @@ CellArray a5_grid_disk(uint64_t cell_id, uintptr_t k);
 
 CellArray a5_grid_disk_vertex(uint64_t cell_id, uintptr_t k);
 
+uint64_t a5_world_cell();
+
+bool a5_is_valid_cell(uint64_t index);
+
+ResultU64 a5_spherical_to_cell(double theta, double phi, int32_t resolution);
+
+CellArray a5_line_string_to_cells(const LonLatDegrees *points, uintptr_t len, int32_t resolution);
+
+CellArray a5_polygon_to_cells(const LonLatDegrees *points, uintptr_t len, int32_t resolution);
+
 }  // extern "C"

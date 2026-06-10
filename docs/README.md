@@ -85,7 +85,14 @@ SELECT a5_cell_to_children(a5_lonlat_to_cell(-74.0060, 40.7128, 10), 11) as chil
 
 ## Code Example: Generate GeoJSON for Cell
 
-To generate a GeoJSON polygon for the A5 cell above use this SQL along with DuckDB's spatial extension:
+The simplest way to get a GeoJSON polygon for an A5 cell is `a5_cell_to_geometry`, which returns a
+DuckDB `GEOMETRY` directly (combine with the spatial extension's `ST_AsGeoJSON`):
+
+```sql
+SELECT ST_AsGeoJSON(a5_cell_to_geometry(a5_lonlat_to_cell(-3.7037, 40.41677, 10))) as g;
+```
+
+Equivalently, without `a5_cell_to_geometry`, you can build the polygon from the raw boundary points:
 
 ```sql
 SELECT
@@ -141,6 +148,36 @@ Visualizing that A5 cell shows:
 
 
 ## 📚 API Reference
+
+### Function Index
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `a5_lonlat_to_cell(lon, lat, res)` | `UBIGINT` | Cell containing a coordinate |
+| `a5_cell_to_lonlat(cell)` | `DOUBLE[2]` | Cell center `[lon, lat]` |
+| `a5_cell_to_spherical(cell)` | `DOUBLE[2]` | Cell center `[theta, phi]` (radians) |
+| `a5_spherical_to_cell(theta, phi, res)` | `UBIGINT` | Cell from spherical coords (inverse of above) |
+| `a5_cell_to_boundary(cell [, closed, segments])` | `DOUBLE[2][]` | Boundary vertices |
+| `a5_cell_area(res)` | `DOUBLE` | Cell area (m²) at a resolution |
+| `a5_get_resolution(cell)` | `INTEGER` | Resolution of a cell |
+| `a5_get_num_cells(res)` | `UBIGINT` | Total cells at a resolution |
+| `a5_get_num_children(parent_res, child_res)` | `UBIGINT` | Children count between resolutions |
+| `a5_cell_to_parent(cell, res)` | `UBIGINT` | Parent at a coarser resolution |
+| `a5_cell_to_children(cell [, res])` | `UBIGINT[]` | Children at a finer resolution |
+| `a5_get_res0_cells()` | `UBIGINT[]` | The 12 base (resolution-0) cells |
+| `a5_world_cell()` | `UBIGINT` | The root world cell (`0`) |
+| `a5_is_valid_cell(cell)` | `BOOLEAN` | Whether a value is a valid cell ID |
+| `a5_compact(cells)` | `UBIGINT[]` | Merge sibling cells into parents |
+| `a5_uncompact(cells, res)` | `UBIGINT[]` | Expand to a uniform resolution |
+| `a5_grid_disk(cell, k)` | `UBIGINT[]` | Cells within `k` edge-steps |
+| `a5_grid_disk_vertex(cell, k)` | `UBIGINT[]` | Cells within `k` vertex-steps |
+| `a5_spherical_cap(cell, radius)` | `UBIGINT[]` | Cells within a radius (meters) |
+| `a5_geometry_to_cells(geom, res)` | `UBIGINT[]` | Cells covering any GEOMETRY |
+| `a5_cell_to_geometry(cell [, segments])` | `GEOMETRY` | Cell as a `POLYGON` |
+| `a5_cell_to_point(cell)` | `GEOMETRY` | Cell center as a `POINT` |
+| `a5_hex_to_u64(hex)` | `UBIGINT` | Parse a hex cell ID |
+| `a5_u64_to_hex(cell)` | `VARCHAR` | Cell ID as a hex string |
+
 
 ### Core Functions
 
@@ -321,6 +358,98 @@ Returns the spherical coordinates [theta, phi] in radians of an A5 cell center, 
 SELECT a5_cell_to_spherical(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as spherical_coords;
 ```
 
+#### `a5_spherical_to_cell(theta, phi, resolution) -> UBIGINT`
+
+Returns the A5 cell at the given resolution containing the spherical coordinates [theta, phi] (in radians). This is the inverse of `a5_cell_to_spherical`.
+
+**Parameters:**
+
+- `theta` (DOUBLE): Azimuthal angle in radians
+- `phi` (DOUBLE): Polar angle in radians
+- `resolution` (INTEGER): Resolution level (0-30)
+
+**Example:**
+```sql
+SELECT a5_spherical_to_cell(-0.512679, 0.913528, 10) as cell;
+┌─────────────────────┐
+│        cell         │
+│       uint64        │
+├─────────────────────┤
+│ 1937278465245970432 │
+└─────────────────────┘
+```
+
+### Region Functions
+
+#### `a5_geometry_to_cells(geom, resolution) -> UBIGINT[]`
+
+Indexes any vector geometry into the set of A5 cells covering it. It builds directly on DuckDB's
+built-in `GEOMETRY` type — no `spatial` extension is required (though it composes with it):
+
+- **Points** map to their containing cell.
+- **Lines** are traced, in order.
+- **Polygons** are filled by **center containment** (a cell is included iff its center lies inside),
+  with interior rings (**holes**) excluded.
+- **`MULTIPOINT` / `MULTILINESTRING` / `MULTIPOLYGON` / `GEOMETRYCOLLECTION`** inputs are unioned.
+
+This is the single entry point for indexing geometries. (To go the other way — cell → geometry —
+see [`a5_cell_to_geometry`](#a5_cell_to_geometrycell_id-segments---geometry).)
+
+**Parameters:**
+
+- `geom` (GEOMETRY): Any geometry
+- `resolution` (INTEGER): Resolution level (0-30)
+
+> **Note:** Polygon coverings are returned **compacted** — cells may be at coarser resolutions where
+> a parent is fully contained. Use
+> [`a5_uncompact`](#a5_uncompactcell_ids-target_resolution---ubigint) to expand to a uniform
+> resolution. Also note that polygon fill is center-based, so features smaller than a cell (no cell
+> center inside) yield no cells.
+
+**Examples:**
+```sql
+-- Index a point, a line, and a polygon
+SELECT a5_geometry_to_cells('POINT(-74.0 40.7)'::GEOMETRY, 8) as cell;
+SELECT a5_geometry_to_cells('LINESTRING(-74.0 40.7, -73.9 40.8)'::GEOMETRY, 8) as line_cells;
+SELECT a5_geometry_to_cells('POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY, 10) as poly_cells;
+
+-- Multi-geometries are unioned
+SELECT a5_geometry_to_cells('MULTIPOINT((-74.0 40.7), (-73.9 40.8))'::GEOMETRY, 8) as cells;
+
+-- Expand a polygon covering to a uniform resolution
+SELECT a5_uncompact(a5_geometry_to_cells(g, 10), 10) FROM (SELECT 'POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY AS g);
+```
+
+### GEOMETRY Output
+
+These functions turn A5 cells back into DuckDB `GEOMETRY` values, so cells become first-class spatial
+objects you can join, measure, and export (e.g. `ST_AsGeoJSON`, `ST_Area`, `ST_Intersects`).
+
+#### `a5_cell_to_geometry(cell_id [, segments]) -> GEOMETRY`
+
+Returns the cell pentagon as a `POLYGON` geometry. The optional `segments` argument interpolates each
+edge into that many segments (densification); omit it for the raw 5-vertex pentagon. The world cell
+(`a5_world_cell()`) returns `POLYGON EMPTY`.
+
+**Example:**
+```sql
+SELECT ST_AsText(a5_cell_to_geometry(a5_lonlat_to_cell(-74.0060, 40.7128, 10))) as wkt;
+-- POLYGON ((-74.0117... 40.7155..., ...))
+```
+
+This makes the GeoJSON example above a one-liner — `a5_cell_to_geometry(cell)` replaces the manual
+`ST_MakePolygon(ST_MakeLine(list_transform(a5_cell_to_boundary(cell), ...)))` construction.
+
+#### `a5_cell_to_point(cell_id) -> GEOMETRY`
+
+Returns the cell center as a `POINT` geometry.
+
+**Example:**
+```sql
+SELECT ST_AsText(a5_cell_to_point(a5_lonlat_to_cell(-74.0060, 40.7128, 10))) as wkt;
+-- POINT (-74.0076... 40.7128...)
+```
+
 ### Traversal Functions
 
 #### `a5_grid_disk(cell_id, k) -> UBIGINT[]`
@@ -408,6 +537,44 @@ SELECT unnest(a5_get_res0_cells()) as base_cells;
 ├─────────────────────┤
 │       12 rows       │
 └─────────────────────┘
+```
+
+#### `a5_world_cell() -> UBIGINT`
+
+Returns the A5 world cell, the root cell that covers the entire globe and is the ancestor of all resolution-0 cells. Its resolution is reported as `-1` since it sits above resolution 0.
+
+**Example:**
+```sql
+SELECT a5_world_cell() as world_cell;
+┌────────────┐
+│ world_cell │
+│   uint64   │
+├────────────┤
+│     0      │
+└────────────┘
+```
+
+#### `a5_is_valid_cell(cell_id) -> BOOLEAN`
+
+Returns `true` if the value is a valid A5 cell — i.e. a canonically-encoded cell ID. Useful for
+guarding against malformed identifiers (e.g. values from another indexing system, or a `BIGINT`
+column that lost its encoding). The world cell (`0`) is considered valid.
+
+The check decodes the ID and verifies it re-encodes to the same value, so it rejects out-of-range
+origins and non-canonical bit patterns. Note that A5's encoding is dense: most in-range 64-bit
+values decode to a genuine cell, so this is a structural well-formedness check, not a guarantee that
+a given number was intentionally produced.
+
+**Example:**
+```sql
+SELECT a5_is_valid_cell(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as ok,
+       a5_is_valid_cell((63::UBIGINT << 58)) as bad_origin;
+┌─────────┬────────────┐
+│   ok    │ bad_origin │
+│ boolean │  boolean   │
+├─────────┼────────────┤
+│ true    │ false      │
+└─────────┴────────────┘
 ```
 
 #### `a5_hex_to_u64(hex) -> UBIGINT`

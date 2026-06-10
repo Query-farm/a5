@@ -451,3 +451,140 @@ statement error
 select a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), -1)
 ----
 a5_grid_disk_vertex: k must be >= 0
+
+# a5_world_cell: returns the root world cell (id 0, resolution -1)
+query II
+select a5_world_cell(), a5_get_resolution(a5_world_cell())
+----
+0	-1
+
+# a5_is_valid_cell: generated cells, the world cell, and all children of a valid cell are valid
+query IIII
+select a5_is_valid_cell(a5_lonlat_to_cell(-122.4, 37.8, 5)),
+       a5_is_valid_cell(a5_world_cell()),
+       (select bool_and(a5_is_valid_cell(c)) from (select unnest(a5_get_res0_cells()) as c)),
+       (select bool_and(a5_is_valid_cell(c)) from (select unnest(a5_cell_to_children(a5_lonlat_to_cell(-122.4, 37.8, 5))) as c))
+----
+true	true	true	true
+
+# a5_is_valid_cell: an out-of-range origin (top bits >= number of base cells) is rejected
+query I
+select a5_is_valid_cell((63::UBIGINT << 58))
+----
+false
+
+# a5_is_valid_cell: NULL propagates
+query I
+select a5_is_valid_cell(NULL)
+----
+NULL
+
+# a5_spherical_to_cell: inverse of a5_cell_to_spherical (round-trip)
+query I
+select a5_spherical_to_cell(s[1], s[2], 10) = c
+from (select a5_lonlat_to_cell(-122.4, 37.8, 10) as c, a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10)) as s)
+----
+true
+
+# a5_spherical_to_cell: resolution out of range error
+statement error
+select a5_spherical_to_cell(0.5, 0.9, 31)
+----
+a5_spherical_to_cell: Resolution must be between 0 and 30
+
+# a5_geometry_to_cells: LINESTRING is traced
+query I
+select length(a5_geometry_to_cells('LINESTRING(0 0, 10 10, 20 5)'::GEOMETRY, 5))
+----
+23
+
+# a5_geometry_to_cells: POLYGON is filled
+query I
+select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5))
+----
+25
+
+# a5_geometry_to_cells: resolution out of range error
+statement error
+select a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 31)
+----
+a5_geometry_to_cells: Resolution must be between 0 and 30
+
+# a5_geometry_to_cells: polygon holes are excluded
+# A cell whose center lies in the hole must not appear in the result.
+query I
+select len(list_intersect(
+  a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9),
+  a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9)
+))
+----
+0
+
+# a5_geometry_to_cells: hole subtraction is exact (with_hole = no_hole - hole, at uniform resolution)
+query I
+select
+  len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9))
+  = len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9), 9))
+  - len(list_distinct(list_intersect(
+      a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9), 9),
+      a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9))))
+----
+true
+
+# a5_cell_to_geometry: returns a POLYGON for a cell, and POLYGON EMPTY for the world cell
+query II
+select starts_with(st_astext(a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5))), 'POLYGON'),
+       st_astext(a5_cell_to_geometry(a5_world_cell()))
+----
+true	POLYGON EMPTY
+
+# a5_cell_to_geometry: segments variant densifies the boundary (larger WKB)
+query I
+select octet_length(st_aswkb(a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5))))
+     < octet_length(st_aswkb(a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5), 4)))
+----
+true
+
+# a5_cell_to_geometry: the cell's own polygon covers the cell (round-trip via a5_geometry_to_cells)
+query I
+select list_contains(a5_geometry_to_cells(a5_cell_to_geometry(a5_lonlat_to_cell(-122.4, 37.8, 5)), 5),
+                     a5_lonlat_to_cell(-122.4, 37.8, 5))
+----
+true
+
+# a5_cell_to_point: center maps back to the same cell
+query I
+select a5_geometry_to_cells(a5_cell_to_point(a5_lonlat_to_cell(-122.4, 37.8, 10)), 10)[1]
+     = a5_lonlat_to_cell(-122.4, 37.8, 10)
+----
+true
+
+# a5_cell_to_point: produces a POINT geometry
+query I
+select starts_with(st_astext(a5_cell_to_point(a5_lonlat_to_cell(-122.4, 37.8, 5))), 'POINT')
+----
+true
+
+# a5_geometry_to_cells: POINT input equals a5_lonlat_to_cell
+query I
+select a5_geometry_to_cells('POINT(-122.4 37.8)'::GEOMETRY, 10) = [a5_lonlat_to_cell(-122.4, 37.8, 10)]
+----
+true
+
+# a5_geometry_to_cells: MULTIPOINT yields one cell per point
+query I
+select len(a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8))
+----
+2
+
+# a5_geometry_to_cells: GEOMETRYCOLLECTION unions its parts
+query I
+select len(a5_geometry_to_cells('GEOMETRYCOLLECTION(POINT(0 0), LINESTRING(0 0, 5 5))'::GEOMETRY, 6)) > 0
+----
+true
+
+# a5_geometry_to_cells: MULTIPOLYGON unions both polygons
+query I
+select len(a5_geometry_to_cells('MULTIPOLYGON(((0 0, 5 0, 5 5, 0 5, 0 0)),((20 20, 25 20, 25 25, 20 25, 20 20)))'::GEOMETRY, 6)) > 0
+----
+true
