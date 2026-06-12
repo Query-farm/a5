@@ -641,74 +641,34 @@ static vector<LonLatDegrees> WkbReadRing(WkbCursor &cur, idx_t dims) {
 
 // Fill a polygon (outer ring minus any holes) into the accumulator.
 //
-// A5's polygon_to_cells returns a *compacted* (mixed-resolution) covering, so the outer
-// covering and a hole's covering generally share no cell IDs and cannot be differenced
-// directly. To subtract holes we uncompact both to the target resolution, take the set
-// difference at that uniform resolution, then re-compact for output. The (common) no-hole
-// case skips all of this and passes the crate's compacted covering through unchanged.
+// Holes are excluded by the a5 crate itself: we flatten all rings (outer first, then
+// holes) into a single point buffer plus a per-ring length array and hand them to
+// a5_polygon_to_cells, which returns the compacted covering of the outer ring with the
+// holes already removed. Empty rings are dropped so a degenerate ring never shifts the
+// outer-ring-is-first convention.
 static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, CellAccumulator &acc,
                                 const char *function_name) {
 	if (rings.empty() || rings[0].empty()) {
 		return;
 	}
-	auto outer = a5_polygon_to_cells(rings[0].data(), rings[0].size(), resolution);
-	ThrowCellArrayError(outer, function_name);
 
-	bool has_holes = false;
-	for (size_t r = 1; r < rings.size(); r++) {
-		if (!rings[r].empty()) {
-			has_holes = true;
-			break;
-		}
-	}
-	if (!has_holes) {
-		for (size_t i = 0; i < outer.len; i++) {
-			acc.Add(outer.data[i]);
-		}
-		a5_free_cell_array(outer);
-		return;
-	}
-
-	// Expand the outer covering to a uniform resolution.
-	auto outer_uniform = a5_uncompact(outer.data, outer.len, resolution);
-	ThrowCellArrayError(outer_uniform, function_name);
-	a5_free_cell_array(outer);
-
-	// Collect the uniform-resolution cells of every hole.
-	std::unordered_set<uint64_t> holes;
-	for (size_t r = 1; r < rings.size(); r++) {
-		if (rings[r].empty()) {
+	vector<LonLatDegrees> points;
+	vector<uintptr_t> ring_lengths;
+	ring_lengths.reserve(rings.size());
+	for (const auto &ring : rings) {
+		if (ring.empty()) {
 			continue;
 		}
-		auto hole = a5_polygon_to_cells(rings[r].data(), rings[r].size(), resolution);
-		ThrowCellArrayError(hole, function_name);
-		auto hole_uniform = a5_uncompact(hole.data, hole.len, resolution);
-		ThrowCellArrayError(hole_uniform, function_name);
-		a5_free_cell_array(hole);
-		for (size_t i = 0; i < hole_uniform.len; i++) {
-			holes.insert(hole_uniform.data[i]);
-		}
-		a5_free_cell_array(hole_uniform);
+		ring_lengths.push_back(ring.size());
+		points.insert(points.end(), ring.begin(), ring.end());
 	}
 
-	// Difference, then re-compact so the output matches the no-hole convention.
-	vector<uint64_t> kept;
-	kept.reserve(outer_uniform.len);
-	for (size_t i = 0; i < outer_uniform.len; i++) {
-		if (holes.find(outer_uniform.data[i]) == holes.end()) {
-			kept.push_back(outer_uniform.data[i]);
-		}
+	auto cells = a5_polygon_to_cells(points.data(), ring_lengths.data(), ring_lengths.size(), resolution);
+	ThrowCellArrayError(cells, function_name);
+	for (size_t i = 0; i < cells.len; i++) {
+		acc.Add(cells.data[i]);
 	}
-	a5_free_cell_array(outer_uniform);
-	if (kept.empty()) {
-		return;
-	}
-	auto compacted = a5_compact(kept.data(), kept.size());
-	ThrowCellArrayError(compacted, function_name);
-	for (size_t i = 0; i < compacted.len; i++) {
-		acc.Add(compacted.data[i]);
-	}
-	a5_free_cell_array(compacted);
+	a5_free_cell_array(cells);
 }
 
 // Recursively read a (possibly multi-part) geometry and accumulate its A5 cells.

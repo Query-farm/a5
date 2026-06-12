@@ -321,12 +321,35 @@ pub extern "C" fn a5_line_string_to_cells(points: *const LonLatDegrees, len: usi
     cell_vec_result_to_c(a5::line_string_to_cells(&lonlats, resolution))
 }
 
+// GeoJSON-style polygon: ring 0 is the outer ring, rings 1.. are holes. The
+// rings are passed flattened into a single `points` buffer, with `ring_lengths`
+// giving the vertex count of each ring (so the offsets can be reconstructed).
+// Holes are excluded by the a5 crate itself - the caller does no hole handling.
 #[no_mangle]
-pub extern "C" fn a5_polygon_to_cells(points: *const LonLatDegrees, len: usize, resolution: i32) -> CellArray {
-    if points.is_null() || len == 0 {
+pub extern "C" fn a5_polygon_to_cells(
+    points: *const LonLatDegrees,
+    ring_lengths: *const usize,
+    ring_count: usize,
+    resolution: i32,
+) -> CellArray {
+    if points.is_null() || ring_lengths.is_null() || ring_count == 0 {
         return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
     }
-    let lonlats = lonlat_slice_to_vec(points, len);
-    cell_vec_result_to_c(a5::polygon_to_cells(&lonlats, resolution))
+    let lengths = unsafe { std::slice::from_raw_parts(ring_lengths, ring_count) };
+    let total: usize = lengths.iter().sum();
+    let flat = unsafe { std::slice::from_raw_parts(points, total) };
+
+    let mut rings: Vec<Vec<a5::LonLat>> = Vec::with_capacity(ring_count);
+    let mut offset = 0;
+    for &len in lengths {
+        rings.push(
+            flat[offset..offset + len]
+                .iter()
+                .map(|p| a5::LonLat::new(p.lon, p.lat))
+                .collect(),
+        );
+        offset += len;
+    }
+    cell_vec_result_to_c(a5::polygon_to_cells(&rings, resolution))
 }
 

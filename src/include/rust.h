@@ -100,6 +100,7 @@ ResultU64 a5_spherical_to_cell(double theta, double phi, int32_t resolution);
 
 CellArray a5_line_string_to_cells(const LonLatDegrees *points, uintptr_t len, int32_t resolution);
 
-CellArray a5_polygon_to_cells(const LonLatDegrees *points, uintptr_t len, int32_t resolution);
+CellArray a5_polygon_to_cells(const LonLatDegrees *points, const uintptr_t *ring_lengths, uintptr_t ring_count,
+                              int32_t resolution);
 
 }  // extern "C"
