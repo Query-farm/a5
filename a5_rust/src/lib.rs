@@ -15,13 +15,6 @@ pub struct ResultLonLat {
 }
 
 #[repr(C)]
-pub struct ResultSpherical {
-    pub theta: f64,
-    pub phi: f64,
-    pub error: *mut std::os::raw::c_char,
-}
-
-#[repr(C)]
 pub struct CellBoundaryOptions {
     pub closed_ring: bool,
     /// Number of segments to use for each edge. Pass None to use the resolution of the cell (default: None)
@@ -252,17 +245,6 @@ pub extern "C" fn a5_get_num_children(parent_res: i32, child_res: i32) -> usize 
 }
 
 #[no_mangle]
-pub extern "C" fn a5_cell_to_spherical(cell: u64) -> ResultSpherical {
-    match a5::cell_to_spherical(cell) {
-        Ok(sph) => ResultSpherical { theta: sph.theta.get(), phi: sph.phi.get(), error: std::ptr::null_mut() },
-        Err(e) => {
-            let err_msg = CString::new(e.to_string()).unwrap();
-            ResultSpherical { theta: 0.0, phi: 0.0, error: err_msg.into_raw() }
-        }
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn a5_spherical_cap(cell_id: u64, radius: f64) -> CellArray {
     cell_vec_result_to_c(a5::spherical_cap(cell_id, radius))
 }
@@ -291,18 +273,6 @@ pub extern "C" fn a5_is_valid_cell(index: u64) -> bool {
             .map(|reencoded| reencoded == index)
             .unwrap_or(false),
         Err(_) => false,
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn a5_spherical_to_cell(theta: f64, phi: f64, resolution: i32) -> ResultU64 {
-    let spherical = a5::coordinate_systems::Spherical::new(a5::Radians::new(theta), a5::Radians::new(phi));
-    match a5::spherical_to_cell(spherical, resolution) {
-        Ok(cell) => ResultU64 { value: cell, error: std::ptr::null_mut() },
-        Err(e) => {
-            let err_msg = CString::new(e.to_string()).unwrap();
-            ResultU64 { value: 0, error: err_msg.into_raw() }
-        }
     }
 }
 

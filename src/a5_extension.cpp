@@ -12,7 +12,7 @@
 namespace duckdb {
 
 #define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026060904"
+#define A5_EXTENSION_VERSION "2026061701"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -369,35 +369,6 @@ inline void A5GetNumChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 	    });
 }
 
-inline void A5CellToSphericalFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &cell_vector = args.data[0];
-
-	auto &result_data_children = ArrayVector::GetEntry(result);
-	double *data_ptr = FlatVector::GetData<double>(result_data_children);
-
-	UnifiedVectorFormat cell_id_format;
-	cell_vector.ToUnifiedFormat(args.size(), cell_id_format);
-	uint64_t *input_data_ptr = FlatVector::GetData<uint64_t>(cell_vector);
-
-	for (idx_t i = 0; i < args.size(); i++) {
-		auto cell_idx = cell_id_format.sel->get_index(i);
-		if (!cell_id_format.validity.RowIsValid(cell_idx)) {
-			FlatVector::SetNull(result, i, true);
-			continue;
-		}
-
-		struct ResultSpherical res = a5_cell_to_spherical(input_data_ptr[cell_idx]);
-		ThrowRustError(res.error, "a5_cell_to_spherical");
-
-		data_ptr[i * 2] = res.theta;
-		data_ptr[i * 2 + 1] = res.phi;
-	}
-
-	if (args.size() == 1) {
-		result.SetVectorType(VectorType::CONSTANT_VECTOR);
-	}
-}
-
 inline void A5SphericalCapFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
@@ -490,21 +461,6 @@ inline void A5WorldCellFun(DataChunk &args, ExpressionState &state, Vector &resu
 inline void A5IsValidCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
 	                                       [&](uint64_t cell) { return a5_is_valid_cell(cell); });
-}
-
-inline void A5SphericalToCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &theta_vector = args.data[0];
-	auto &phi_vector = args.data[1];
-	auto &resolution_vector = args.data[2];
-
-	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
-	    theta_vector, phi_vector, resolution_vector, result, args.size(),
-	    [&](double theta, double phi, int32_t resolution) {
-		    ValidateResolution(resolution, "a5_spherical_to_cell");
-		    struct ResultU64 res = a5_spherical_to_cell(theta, phi, resolution);
-		    ThrowRustError(res.error, "a5_spherical_to_cell");
-		    return res.value;
-	    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1023,21 +979,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// a5_cell_to_spherical: Returns the spherical coordinates of a cell center
-	{
-		auto func = ScalarFunction("a5_cell_to_spherical", {LogicalType::UBIGINT},
-		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToSphericalFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the spherical coordinates [theta, phi] in radians of an A5 cell center";
-		desc.parameter_names = {"cell"};
-		desc.parameter_types = {LogicalType::UBIGINT};
-		desc.examples = {"a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
-		loader.RegisterFunction(std::move(info));
-	}
-
 	// a5_spherical_cap: Returns cells within a spherical cap radius
 	{
 		auto func = ScalarFunction("a5_spherical_cap", {LogicalType::UBIGINT, LogicalType::DOUBLE},
@@ -1108,23 +1049,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"cell"};
 		desc.parameter_types = {LogicalType::UBIGINT};
 		desc.examples = {"a5_is_valid_cell(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
-		loader.RegisterFunction(std::move(info));
-	}
-
-	// a5_spherical_to_cell: Returns the cell containing the given spherical coordinates
-	{
-		auto func =
-		    ScalarFunction("a5_spherical_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-		                   LogicalType::UBIGINT, A5SphericalToCellFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the A5 cell at the given resolution containing the spherical coordinates "
-		                   "[theta, phi] (in radians); the inverse of a5_cell_to_spherical";
-		desc.parameter_names = {"theta", "phi", "resolution"};
-		desc.parameter_types = {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER};
-		desc.examples = {"a5_spherical_to_cell(2.14, 0.92, 10)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));

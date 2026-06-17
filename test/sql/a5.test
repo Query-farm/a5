@@ -411,12 +411,6 @@ select a5_get_num_children(0, 1), a5_get_num_children(0, 2), a5_get_num_children
 ----
 5	20	1
 
-# a5_cell_to_spherical: Get spherical coordinates of cell center
-query I
-select list_transform(a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10)), x -> round(x, 6))
-----
-[-0.512679, 0.913528]
-
 # a5_spherical_cap: Get cells within radius
 query II
 select length(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 1000.0)), length(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 50000.0))
@@ -478,19 +472,6 @@ query I
 select a5_is_valid_cell(NULL)
 ----
 NULL
-
-# a5_spherical_to_cell: inverse of a5_cell_to_spherical (round-trip)
-query I
-select a5_spherical_to_cell(s[1], s[2], 10) = c
-from (select a5_lonlat_to_cell(-122.4, 37.8, 10) as c, a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10)) as s)
-----
-true
-
-# a5_spherical_to_cell: resolution out of range error
-statement error
-select a5_spherical_to_cell(0.5, 0.9, 31)
-----
-a5_spherical_to_cell: Resolution must be between 0 and 30
 
 # a5_geometry_to_cells: LINESTRING is traced
 query I

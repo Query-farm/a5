@@ -155,8 +155,6 @@ Visualizing that A5 cell shows:
 |----------|---------|-------------|
 | `a5_lonlat_to_cell(lon, lat, res)` | `UBIGINT` | Cell containing a coordinate |
 | `a5_cell_to_lonlat(cell)` | `DOUBLE[2]` | Cell center `[lon, lat]` |
-| `a5_cell_to_spherical(cell)` | `DOUBLE[2]` | Cell center `[theta, phi]` (radians) |
-| `a5_spherical_to_cell(theta, phi, res)` | `UBIGINT` | Cell from spherical coords (inverse of above) |
 | `a5_cell_to_boundary(cell [, closed, segments])` | `DOUBLE[2][]` | Boundary vertices |
 | `a5_cell_area(res)` | `DOUBLE` | Cell area (m²) at a resolution |
 | `a5_get_resolution(cell)` | `INTEGER` | Resolution of a cell |
@@ -345,38 +343,6 @@ SELECT unnest(a5_cell_to_boundary(207618739568, false, 5)) as boundary_points;
 ├───────────────────────────────────────────┤
 │                  25 rows                  │
 └───────────────────────────────────────────┘
-```
-
-
-
-#### `a5_cell_to_spherical(cell_id) -> DOUBLE[2]`
-
-Returns the spherical coordinates [theta, phi] in radians of an A5 cell center, where theta is the azimuthal angle and phi is the polar angle.
-
-**Example:**
-```sql
-SELECT a5_cell_to_spherical(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as spherical_coords;
-```
-
-#### `a5_spherical_to_cell(theta, phi, resolution) -> UBIGINT`
-
-Returns the A5 cell at the given resolution containing the spherical coordinates [theta, phi] (in radians). This is the inverse of `a5_cell_to_spherical`.
-
-**Parameters:**
-
-- `theta` (DOUBLE): Azimuthal angle in radians
-- `phi` (DOUBLE): Polar angle in radians
-- `resolution` (INTEGER): Resolution level (0-30)
-
-**Example:**
-```sql
-SELECT a5_spherical_to_cell(-0.512679, 0.913528, 10) as cell;
-┌─────────────────────┐
-│        cell         │
-│       uint64        │
-├─────────────────────┤
-│ 1937278465245970432 │
-└─────────────────────┘
 ```
 
 ### Region Functions
