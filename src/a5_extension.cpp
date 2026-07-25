@@ -12,7 +12,7 @@
 namespace duckdb {
 
 #define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026062301"
+#define A5_EXTENSION_VERSION "2026072501"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
