@@ -12,7 +12,7 @@
 namespace duckdb {
 
 #define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026072501"
+#define A5_EXTENSION_VERSION "2026082801"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -53,6 +53,14 @@ inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &resul
 	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
 		ValidateResolution(resolution, "a5_cell_area");
 		return a5_cell_area(resolution);
+	});
+}
+
+inline void A5CellEdgeLengthAvgFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &resolution_vector = args.data[0];
+	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
+		ValidateResolution(resolution, "a5_cell_edge_length_avg");
+		return a5_cell_edge_length_avg(resolution);
 	});
 }
 
@@ -601,9 +609,10 @@ static vector<LonLatDegrees> WkbReadRing(WkbCursor &cur, idx_t dims) {
 // holes) into a single point buffer plus a per-ring length array and hand them to
 // a5_polygon_to_cells, which returns the compacted covering of the outer ring with the
 // holes already removed. Empty rings are dropped so a degenerate ring never shifts the
-// outer-ring-is-first convention.
-static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, CellAccumulator &acc,
-                                const char *function_name) {
+// outer-ring-is-first convention. `overlapping` selects gap-free (Containment::Overlapping)
+// coverage instead of the default cell-center (Containment::Center) containment.
+static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, bool overlapping,
+                                CellAccumulator &acc, const char *function_name) {
 	if (rings.empty() || rings[0].empty()) {
 		return;
 	}
@@ -619,7 +628,7 @@ static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int3
 		points.insert(points.end(), ring.begin(), ring.end());
 	}
 
-	auto cells = a5_polygon_to_cells(points.data(), ring_lengths.data(), ring_lengths.size(), resolution);
+	auto cells = a5_polygon_to_cells(points.data(), ring_lengths.data(), ring_lengths.size(), resolution, overlapping);
 	ThrowCellArrayError(cells, function_name);
 	for (size_t i = 0; i < cells.len; i++) {
 		acc.Add(cells.data[i]);
@@ -629,7 +638,8 @@ static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int3
 
 // Recursively read a (possibly multi-part) geometry and accumulate its A5 cells.
 // Each MULTI* / GEOMETRYCOLLECTION part carries its own WKB header, so we recurse.
-static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccumulator &acc, int depth) {
+static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, bool overlapping, CellAccumulator &acc,
+                                   int depth) {
 	if (depth > 16) {
 		throw InvalidInputException(string(cur.function_name) + ": GEOMETRY nesting too deep");
 	}
@@ -676,7 +686,7 @@ static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccum
 		for (uint32_t r = 0; r < ring_count; r++) {
 			rings.push_back(WkbReadRing(cur, dims));
 		}
-		PolygonRingsToCells(rings, resolution, acc, cur.function_name);
+		PolygonRingsToCells(rings, resolution, overlapping, acc, cur.function_name);
 		break;
 	}
 	case GeometryType::MULTIPOINT:
@@ -685,7 +695,7 @@ static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccum
 	case GeometryType::GEOMETRYCOLLECTION: {
 		uint32_t part_count = cur.U32();
 		for (uint32_t p = 0; p < part_count; p++) {
-			WkbReadGeometryToCells(cur, resolution, acc, depth + 1);
+			WkbReadGeometryToCells(cur, resolution, overlapping, acc, depth + 1);
 		}
 		break;
 	}
@@ -710,18 +720,33 @@ static list_entry_t PushCells(Vector &result, uint64_t &offset, idx_t &result_si
 }
 
 // a5_geometry_to_cells: run any GEOMETRY through the recursive WKB reader, accumulating its cells.
+// `overlapping` (default false) selects gap-free (Containment::Overlapping) coverage for any
+// polygon parts of the geometry instead of the default cell-center (Containment::Center) containment.
 inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	static const char *function_name = "a5_geometry_to_cells";
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 	idx_t result_size = ListVector::GetListSize(result);
 
-	BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
-	    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+	if (args.ColumnCount() == 2) {
+		BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
+		    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+			    ValidateResolution(resolution, function_name);
+			    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
+			    CellAccumulator acc;
+			    WkbReadGeometryToCells(cur, resolution, false, acc, 0);
+			    return PushCells(result, offset, result_size, acc.cells);
+		    });
+		return;
+	}
+
+	TernaryExecutor::Execute<string_t, int32_t, bool, list_entry_t>(
+	    args.data[0], args.data[1], args.data[2], result, args.size(),
+	    [&](string_t geom, int32_t resolution, bool overlapping) {
 		    ValidateResolution(resolution, function_name);
 		    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 		    CellAccumulator acc;
-		    WkbReadGeometryToCells(cur, resolution, acc, 0);
+		    WkbReadGeometryToCells(cur, resolution, overlapping, acc, 0);
 		    return PushCells(result, offset, result_size, acc.cells);
 	    });
 }
@@ -736,6 +761,22 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"resolution"};
 		desc.parameter_types = {LogicalType::INTEGER};
 		desc.examples = {"a5_cell_area(10)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_edge_length_avg: Returns the average edge length of a cell at a given resolution
+	{
+		auto func = ScalarFunction("a5_cell_edge_length_avg", {LogicalType::INTEGER}, LogicalType::DOUBLE,
+		                           A5CellEdgeLengthAvgFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the average edge length in meters of an A5 cell at the specified resolution "
+		                   "level; individual edges vary from the average by roughly +/-10%";
+		desc.parameter_names = {"resolution"};
+		desc.parameter_types = {LogicalType::INTEGER};
+		desc.examples = {"a5_cell_edge_length_avg(10)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
@@ -1056,19 +1097,35 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_geometry_to_cells: Returns the cells covering any geometry
 	{
-		auto func = ScalarFunction("a5_geometry_to_cells", {LogicalType::GEOMETRY(), LogicalType::INTEGER},
-		                           LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
-		                   "their containing cell, lines are traced, and polygons are filled (holes excluded); MULTI* "
-		                   "and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are compacted - use "
-		                   "a5_uncompact to expand to a uniform resolution";
-		desc.parameter_names = {"geom", "resolution"};
-		desc.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
-		desc.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
+		ScalarFunctionSet func_set("a5_geometry_to_cells");
+		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		CreateScalarFunctionInfo info(func_set);
+
+		FunctionDescription desc1;
+		desc1.description =
+		    "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
+		    "their containing cell, lines are traced, and polygons are filled with cell-center containment "
+		    "(holes excluded); MULTI* and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are "
+		    "compacted - use a5_uncompact to expand to a uniform resolution";
+		desc1.parameter_names = {"geom", "resolution"};
+		desc1.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
+		desc1.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
+
+		FunctionDescription desc2;
+		desc2.description =
+		    "Returns the A5 cells covering an arbitrary geometry at the given resolution, as above. For "
+		    "polygon parts, setting overlapping to true additionally includes every cell that touches the "
+		    "polygon boundary, giving gap-free coverage instead of the default cell-center containment";
+		desc2.parameter_names = {"geom", "resolution", "overlapping"};
+		desc2.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN};
+		desc2.examples = {"a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 8, true)"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
 		loader.RegisterFunction(std::move(info));
 	}
 

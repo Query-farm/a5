@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is a DuckDB extension that provides A5 geospatial indexing functions. A5 is a pentagonal geospatial index system with millimeter-accurate, equal-area cells across 31 resolution levels.
 
 **Architecture**: The extension uses a hybrid C++/Rust implementation:
-- **Rust core** (`a5_rust/`): Provides FFI bindings to the upstream `a5` crate (v0.8.0)
+- **Rust core** (`a5_rust/`): Provides FFI bindings to the upstream `a5` crate (v0.10.0)
 - **C++ wrapper** (`src/`): Implements DuckDB scalar functions that call into Rust via C FFI
 - **Build system**: CMake with Corrosion for Rust integration
 

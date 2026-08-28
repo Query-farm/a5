@@ -163,6 +163,7 @@ Visualizing that A5 cell shows:
 | `a5_cell_to_lonlat(cell)` | `DOUBLE[2]` | Cell center `[lon, lat]` |
 | `a5_cell_to_boundary(cell [, closed, segments])` | `DOUBLE[2][]` | Boundary vertices |
 | `a5_cell_area(res)` | `DOUBLE` | Cell area (m²) at a resolution |
+| `a5_cell_edge_length_avg(res)` | `DOUBLE` | Average cell edge length (m) at a resolution |
 | `a5_get_resolution(cell)` | `INTEGER` | Resolution of a cell |
 | `a5_get_num_cells(res)` | `UBIGINT` | Total cells at a resolution |
 | `a5_get_num_children(parent_res, child_res)` | `UBIGINT` | Children count between resolutions |
@@ -176,7 +177,7 @@ Visualizing that A5 cell shows:
 | `a5_grid_disk(cell, k)` | `UBIGINT[]` | Cells within `k` edge-steps |
 | `a5_grid_disk_vertex(cell, k)` | `UBIGINT[]` | Cells within `k` vertex-steps |
 | `a5_spherical_cap(cell, radius)` | `UBIGINT[]` | Cells within a radius (meters) |
-| `a5_geometry_to_cells(geom, res)` | `UBIGINT[]` | Cells covering any GEOMETRY |
+| `a5_geometry_to_cells(geom, res [, overlapping])` | `UBIGINT[]` | Cells covering any GEOMETRY |
 | `a5_cell_to_geometry(cell [, segments])` | `GEOMETRY` | Cell as a `POLYGON` |
 | `a5_cell_to_point(cell)` | `GEOMETRY` | Cell center as a `POINT` |
 | `a5_hex_to_u64(hex)` | `UBIGINT` | Parse a hex cell ID |
@@ -218,6 +219,23 @@ SELECT a5_cell_area(5) as area_m2;
 │       double       │
 ├────────────────────┤
 │ 33207397446.578068 │
+└────────────────────┘
+```
+
+#### `a5_cell_edge_length_avg(resolution) -> DOUBLE`
+
+Returns the average edge length of an A5 cell at the specified resolution, in meters. Individual
+edges vary from the average by roughly ±10%, depending on the cell's shape and its position on the
+globe.
+
+**Example:**
+```sql
+SELECT a5_cell_edge_length_avg(5) as edge_length_m;
+┌────────────────────┐
+│   edge_length_m    │
+│       double       │
+├────────────────────┤
+│ 149609.98423330215 │
 └────────────────────┘
 ```
 
@@ -353,15 +371,16 @@ SELECT unnest(a5_cell_to_boundary(207618739568, false, 5)) as boundary_points;
 
 ### Region Functions
 
-#### `a5_geometry_to_cells(geom, resolution) -> UBIGINT[]`
+#### `a5_geometry_to_cells(geom, resolution [, overlapping]) -> UBIGINT[]`
 
 Indexes any vector geometry into the set of A5 cells covering it. It builds directly on DuckDB's
 built-in `GEOMETRY` type — no `spatial` extension is required (though it composes with it):
 
 - **Points** map to their containing cell.
 - **Lines** are traced, in order.
-- **Polygons** are filled by **center containment** (a cell is included iff its center lies inside),
-  with interior rings (**holes**) excluded.
+- **Polygons** are filled by **center containment** by default (a cell is included iff its center
+  lies inside), with interior rings (**holes**) excluded. Pass `overlapping := true` for **gap-free**
+  coverage instead — every cell that touches the polygon boundary is additionally included.
 - **`MULTIPOINT` / `MULTILINESTRING` / `MULTIPOLYGON` / `GEOMETRYCOLLECTION`** inputs are unioned.
 
 This is the single entry point for indexing geometries. (To go the other way — cell → geometry —
@@ -371,12 +390,14 @@ see [`a5_cell_to_geometry`](#a5_cell_to_geometrycell_id-segments---geometry).)
 
 - `geom` (GEOMETRY): Any geometry
 - `resolution` (INTEGER): Resolution level (0-30)
+- `overlapping` (BOOLEAN): For polygon parts, include every cell overlapping the boundary (gap-free
+  coverage) instead of only cells whose center lies inside. Defaults to `false`.
 
 > **Note:** Polygon coverings are returned **compacted** — cells may be at coarser resolutions where
 > a parent is fully contained. Use
 > [`a5_uncompact`](#a5_uncompactcell_ids-target_resolution---ubigint) to expand to a uniform
-> resolution. Also note that polygon fill is center-based, so features smaller than a cell (no cell
-> center inside) yield no cells.
+> resolution. Also note that with the default center containment, features smaller than a cell (no
+> cell center inside) yield no cells — use `overlapping := true` if you need those covered instead.
 
 **Examples:**
 ```sql
@@ -390,6 +411,9 @@ SELECT a5_geometry_to_cells('MULTIPOINT((-74.0 40.7), (-73.9 40.8))'::GEOMETRY, 
 
 -- Expand a polygon covering to a uniform resolution
 SELECT a5_uncompact(a5_geometry_to_cells(g, 10), 10) FROM (SELECT 'POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY AS g);
+
+-- Gap-free coverage: every cell touching the polygon, not just cells whose center is inside
+SELECT len(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true)) as overlapping_cells;
 ```
 
 **Polygon holes:** Interior rings are excluded from the covering — the a5 crate removes them

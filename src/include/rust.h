@@ -50,6 +50,8 @@ ResultU64 a5_cell_to_parent(uint64_t index, int32_t parent_resolution);
 
 double a5_cell_area(int32_t resolution);
 
+double a5_cell_edge_length_avg(int32_t resolution);
+
 ResultLonLat a5_cell_to_lon_lat(uint64_t cell);
 
 uint64_t a5_get_num_cells(int32_t resolution);
@@ -93,6 +95,7 @@ CellArray a5_line_string_to_cells(const LonLatDegrees *points, uintptr_t len, in
 CellArray a5_polygon_to_cells(const LonLatDegrees *points,
                               const uintptr_t *ring_lengths,
                               uintptr_t ring_count,
-                              int32_t resolution);
+                              int32_t resolution,
+                              bool overlapping);
 
 }  // extern "C"

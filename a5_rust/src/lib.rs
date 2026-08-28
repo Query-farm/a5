@@ -62,6 +62,11 @@ pub extern "C" fn a5_cell_area(resolution: i32) -> f64 {
 }
 
 #[no_mangle]
+pub extern "C" fn a5_cell_edge_length_avg(resolution: i32) -> f64 {
+    a5::cell_edge_length_avg(resolution)
+}
+
+#[no_mangle]
 pub extern "C" fn a5_cell_to_lon_lat(cell: u64) -> ResultLonLat {
     match a5::cell_to_lonlat(cell) {
         Ok(lonlat) => ResultLonLat { longitude: lonlat.longitude.get(), latitude: lonlat.latitude.get(), error: std::ptr::null_mut() },
@@ -295,12 +300,16 @@ pub extern "C" fn a5_line_string_to_cells(points: *const LonLatDegrees, len: usi
 // rings are passed flattened into a single `points` buffer, with `ring_lengths`
 // giving the vertex count of each ring (so the offsets can be reconstructed).
 // Holes are excluded by the a5 crate itself - the caller does no hole handling.
+// `overlapping` selects a5's Containment::Overlapping (every cell touching the
+// polygon, for gap-free coverage) instead of the default Containment::Center
+// (cell center inside the polygon).
 #[no_mangle]
 pub extern "C" fn a5_polygon_to_cells(
     points: *const LonLatDegrees,
     ring_lengths: *const usize,
     ring_count: usize,
     resolution: i32,
+    overlapping: bool,
 ) -> CellArray {
     if points.is_null() || ring_lengths.is_null() || ring_count == 0 {
         return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
@@ -320,6 +329,12 @@ pub extern "C" fn a5_polygon_to_cells(
         );
         offset += len;
     }
-    cell_vec_result_to_c(a5::polygon_to_cells(&rings, resolution))
+    let containment = if overlapping {
+        a5::regions::polygon::Containment::Overlapping
+    } else {
+        a5::regions::polygon::Containment::Center
+    };
+    let options = a5::regions::polygon::PolygonToCellsOptions { containment };
+    cell_vec_result_to_c(a5::polygon_to_cells(&rings, resolution, Some(options)))
 }
 

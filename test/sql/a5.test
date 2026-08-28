@@ -47,6 +47,48 @@ select round(a5_cell_area(columns(*)::integer)) from range(31)
 0.0
 0.0
 
+# Test getting the average edge length of a A5 cell.
+query R
+select round(a5_cell_edge_length_avg(columns(*)::integer), 4) from range(31)
+----
+4649142.3229
+4320430.2
+1190173.8478
+597565.2379
+299147.0769
+149609.9842
+74814.1036
+37407.0518
+18703.5259
+9351.7629
+4675.8815
+2337.9407
+1168.9704
+584.4852
+292.2426
+146.1213
+73.0606
+36.5303
+18.2652
+9.1326
+4.5663
+2.2831
+1.1416
+0.5708
+0.2854
+0.1427
+0.0713
+0.0357
+0.0178
+0.0089
+0.0045
+
+# a5_cell_edge_length_avg: resolution out of range error
+statement error
+select a5_cell_edge_length_avg(31)
+----
+a5_cell_edge_length_avg: Resolution must be between 0 and 30
+
 # Get the number of cells at each resolution level, there are
 # 30 different resolution levels
 query I
@@ -484,6 +526,29 @@ query I
 select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5))
 ----
 25
+
+# a5_geometry_to_cells: overlapping=false matches the default (center) containment
+query I
+select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, false))
+----
+25
+
+# a5_geometry_to_cells: overlapping=true gives gap-free coverage, a superset of the default
+query I
+select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true))
+----
+27
+
+# The default (center) containment cells are a subset of the overlapping cells. Both
+# sides are compacted, so uncompact to a uniform resolution before comparing (as with
+# the hole-subtraction test below).
+query I
+select len(list_intersect(
+  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5), 5),
+  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true), 5)))
+= len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5), 5))
+----
+true
 
 # a5_geometry_to_cells: resolution out of range error
 statement error
