@@ -9,7 +9,7 @@ set(prefix_to_check "wasm")
 # Get the length of the prefix
 string(LENGTH "${prefix_to_check}" prefix_length)
 # Extract the prefix from the example_string
-string(SUBSTRING "${DUCKDB_PLATFORM}" 0 ${prefix_length} extracted_platform_prefix)
+string(SUBSTRING "${DUCKDB_EXPLICIT_PLATFORM}" 0 ${prefix_length} extracted_platform_prefix)
 
 
 execute_process(
@@ -55,9 +55,10 @@ endif()
 
 string(FIND "${RUST_TARGETS}" "wasm32-unknown-emscripten" WASM_TARGET_FOUND)
 
-# Only steer the Rust target to wasm when we're actually doing a wasm build (DUCKDB_PLATFORM
-# starts with "wasm") - otherwise, having the wasm32-unknown-emscripten rustup target merely
-# installed would hijack a native build and produce a static lib the native linker can't use.
+# Only steer the Rust target to wasm when we're actually doing a wasm build
+# (DUCKDB_EXPLICIT_PLATFORM starts with "wasm") - otherwise, having the wasm32-unknown-emscripten
+# rustup target merely installed would hijack a native build and produce a static lib the native
+# linker can't use.
 if (NOT WASM_TARGET_FOUND EQUAL -1 AND "${extracted_platform_prefix}" STREQUAL "${prefix_to_check}")
   set(Rust_CARGO_TARGET "wasm32-unknown-emscripten")
 endif()
@@ -67,7 +68,7 @@ message(STATUS "WASM_TARGET_FOUND: ${WASM_TARGET_FOUND}")
 message(STATUS "TARGET: ${TARGET}")
 message(STATUS "DUCKDB_BUILD_TYPE: ${DUCKDB_BUILD_TYPE}")
 message(STATUS "TARGET NAME: ${TARGET_NAME}")
-message(STATUS "DUCKDB_PLATFORM: ${DUCKDB_PLATFORM}")
+message(STATUS "DUCKDB_EXPLICIT_PLATFORM: ${DUCKDB_EXPLICIT_PLATFORM}")
 message(STATUS "OS_ARCH: ${OS_ARCH}")
 message(STATUS "OS_NAME: ${OS_NAME}")
 message(STATUS "Rust_CARGO_TARGET: ${Rust_CARGO_TARGET}")
