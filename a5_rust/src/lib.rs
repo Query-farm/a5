@@ -15,13 +15,6 @@ pub struct ResultLonLat {
 }
 
 #[repr(C)]
-pub struct ResultSpherical {
-    pub theta: f64,
-    pub phi: f64,
-    pub error: *mut std::os::raw::c_char,
-}
-
-#[repr(C)]
 pub struct CellBoundaryOptions {
     pub closed_ring: bool,
     /// Number of segments to use for each edge. Pass None to use the resolution of the cell (default: None)
@@ -66,6 +59,11 @@ pub extern "C" fn a5_cell_to_parent(index: u64, parent_resolution: i32) -> Resul
 #[no_mangle]
 pub extern "C" fn a5_cell_area(resolution: i32) -> f64 {
     a5::cell_area(resolution)
+}
+
+#[no_mangle]
+pub extern "C" fn a5_cell_edge_length_avg(resolution: i32) -> f64 {
+    a5::cell_edge_length_avg(resolution)
 }
 
 #[no_mangle]
@@ -252,17 +250,6 @@ pub extern "C" fn a5_get_num_children(parent_res: i32, child_res: i32) -> usize 
 }
 
 #[no_mangle]
-pub extern "C" fn a5_cell_to_spherical(cell: u64) -> ResultSpherical {
-    match a5::cell_to_spherical(cell) {
-        Ok(sph) => ResultSpherical { theta: sph.theta.get(), phi: sph.phi.get(), error: std::ptr::null_mut() },
-        Err(e) => {
-            let err_msg = CString::new(e.to_string()).unwrap();
-            ResultSpherical { theta: 0.0, phi: 0.0, error: err_msg.into_raw() }
-        }
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn a5_spherical_cap(cell_id: u64, radius: f64) -> CellArray {
     cell_vec_result_to_c(a5::spherical_cap(cell_id, radius))
 }
@@ -294,18 +281,6 @@ pub extern "C" fn a5_is_valid_cell(index: u64) -> bool {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn a5_spherical_to_cell(theta: f64, phi: f64, resolution: i32) -> ResultU64 {
-    let spherical = a5::coordinate_systems::Spherical::new(a5::Radians::new(theta), a5::Radians::new(phi));
-    match a5::spherical_to_cell(spherical, resolution) {
-        Ok(cell) => ResultU64 { value: cell, error: std::ptr::null_mut() },
-        Err(e) => {
-            let err_msg = CString::new(e.to_string()).unwrap();
-            ResultU64 { value: 0, error: err_msg.into_raw() }
-        }
-    }
-}
-
 // Build a Vec<a5::LonLat> from a C array of LonLatDegrees (lon, lat) input points.
 fn lonlat_slice_to_vec(points: *const LonLatDegrees, len: usize) -> Vec<a5::LonLat> {
     let slice = unsafe { std::slice::from_raw_parts(points, len) };
@@ -321,12 +296,45 @@ pub extern "C" fn a5_line_string_to_cells(points: *const LonLatDegrees, len: usi
     cell_vec_result_to_c(a5::line_string_to_cells(&lonlats, resolution))
 }
 
+// GeoJSON-style polygon: ring 0 is the outer ring, rings 1.. are holes. The
+// rings are passed flattened into a single `points` buffer, with `ring_lengths`
+// giving the vertex count of each ring (so the offsets can be reconstructed).
+// Holes are excluded by the a5 crate itself - the caller does no hole handling.
+// `overlapping` selects a5's Containment::Overlapping (every cell touching the
+// polygon, for gap-free coverage) instead of the default Containment::Center
+// (cell center inside the polygon).
 #[no_mangle]
-pub extern "C" fn a5_polygon_to_cells(points: *const LonLatDegrees, len: usize, resolution: i32) -> CellArray {
-    if points.is_null() || len == 0 {
+pub extern "C" fn a5_polygon_to_cells(
+    points: *const LonLatDegrees,
+    ring_lengths: *const usize,
+    ring_count: usize,
+    resolution: i32,
+    overlapping: bool,
+) -> CellArray {
+    if points.is_null() || ring_lengths.is_null() || ring_count == 0 {
         return CellArray { data: std::ptr::null_mut(), len: 0, error: std::ptr::null_mut() };
     }
-    let lonlats = lonlat_slice_to_vec(points, len);
-    cell_vec_result_to_c(a5::polygon_to_cells(&lonlats, resolution))
+    let lengths = unsafe { std::slice::from_raw_parts(ring_lengths, ring_count) };
+    let total: usize = lengths.iter().sum();
+    let flat = unsafe { std::slice::from_raw_parts(points, total) };
+
+    let mut rings: Vec<Vec<a5::LonLat>> = Vec::with_capacity(ring_count);
+    let mut offset = 0;
+    for &len in lengths {
+        rings.push(
+            flat[offset..offset + len]
+                .iter()
+                .map(|p| a5::LonLat::new(p.lon, p.lat))
+                .collect(),
+        );
+        offset += len;
+    }
+    let containment = if overlapping {
+        a5::regions::polygon::Containment::Overlapping
+    } else {
+        a5::regions::polygon::Containment::Center
+    };
+    let options = a5::regions::polygon::PolygonToCellsOptions { containment };
+    cell_vec_result_to_c(a5::polygon_to_cells(&rings, resolution, Some(options)))
 }
 

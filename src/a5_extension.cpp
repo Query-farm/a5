@@ -12,7 +12,7 @@
 namespace duckdb {
 
 #define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026060904"
+#define A5_EXTENSION_VERSION "2026082802"
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
@@ -53,6 +53,14 @@ inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &resul
 	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
 		ValidateResolution(resolution, "a5_cell_area");
 		return a5_cell_area(resolution);
+	});
+}
+
+inline void A5CellEdgeLengthAvgFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &resolution_vector = args.data[0];
+	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
+		ValidateResolution(resolution, "a5_cell_edge_length_avg");
+		return a5_cell_edge_length_avg(resolution);
 	});
 }
 
@@ -369,35 +377,6 @@ inline void A5GetNumChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 	    });
 }
 
-inline void A5CellToSphericalFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &cell_vector = args.data[0];
-
-	auto &result_data_children = ArrayVector::GetEntry(result);
-	double *data_ptr = FlatVector::GetData<double>(result_data_children);
-
-	UnifiedVectorFormat cell_id_format;
-	cell_vector.ToUnifiedFormat(args.size(), cell_id_format);
-	uint64_t *input_data_ptr = FlatVector::GetData<uint64_t>(cell_vector);
-
-	for (idx_t i = 0; i < args.size(); i++) {
-		auto cell_idx = cell_id_format.sel->get_index(i);
-		if (!cell_id_format.validity.RowIsValid(cell_idx)) {
-			FlatVector::SetNull(result, i, true);
-			continue;
-		}
-
-		struct ResultSpherical res = a5_cell_to_spherical(input_data_ptr[cell_idx]);
-		ThrowRustError(res.error, "a5_cell_to_spherical");
-
-		data_ptr[i * 2] = res.theta;
-		data_ptr[i * 2 + 1] = res.phi;
-	}
-
-	if (args.size() == 1) {
-		result.SetVectorType(VectorType::CONSTANT_VECTOR);
-	}
-}
-
 inline void A5SphericalCapFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
@@ -490,21 +469,6 @@ inline void A5WorldCellFun(DataChunk &args, ExpressionState &state, Vector &resu
 inline void A5IsValidCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
 	                                       [&](uint64_t cell) { return a5_is_valid_cell(cell); });
-}
-
-inline void A5SphericalToCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &theta_vector = args.data[0];
-	auto &phi_vector = args.data[1];
-	auto &resolution_vector = args.data[2];
-
-	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
-	    theta_vector, phi_vector, resolution_vector, result, args.size(),
-	    [&](double theta, double phi, int32_t resolution) {
-		    ValidateResolution(resolution, "a5_spherical_to_cell");
-		    struct ResultU64 res = a5_spherical_to_cell(theta, phi, resolution);
-		    ThrowRustError(res.error, "a5_spherical_to_cell");
-		    return res.value;
-	    });
 }
 
 // ---------------------------------------------------------------------------
@@ -641,79 +605,41 @@ static vector<LonLatDegrees> WkbReadRing(WkbCursor &cur, idx_t dims) {
 
 // Fill a polygon (outer ring minus any holes) into the accumulator.
 //
-// A5's polygon_to_cells returns a *compacted* (mixed-resolution) covering, so the outer
-// covering and a hole's covering generally share no cell IDs and cannot be differenced
-// directly. To subtract holes we uncompact both to the target resolution, take the set
-// difference at that uniform resolution, then re-compact for output. The (common) no-hole
-// case skips all of this and passes the crate's compacted covering through unchanged.
-static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, CellAccumulator &acc,
-                                const char *function_name) {
+// Holes are excluded by the a5 crate itself: we flatten all rings (outer first, then
+// holes) into a single point buffer plus a per-ring length array and hand them to
+// a5_polygon_to_cells, which returns the compacted covering of the outer ring with the
+// holes already removed. Empty rings are dropped so a degenerate ring never shifts the
+// outer-ring-is-first convention. `overlapping` selects gap-free (Containment::Overlapping)
+// coverage instead of the default cell-center (Containment::Center) containment.
+static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, bool overlapping,
+                                CellAccumulator &acc, const char *function_name) {
 	if (rings.empty() || rings[0].empty()) {
 		return;
 	}
-	auto outer = a5_polygon_to_cells(rings[0].data(), rings[0].size(), resolution);
-	ThrowCellArrayError(outer, function_name);
 
-	bool has_holes = false;
-	for (size_t r = 1; r < rings.size(); r++) {
-		if (!rings[r].empty()) {
-			has_holes = true;
-			break;
-		}
-	}
-	if (!has_holes) {
-		for (size_t i = 0; i < outer.len; i++) {
-			acc.Add(outer.data[i]);
-		}
-		a5_free_cell_array(outer);
-		return;
-	}
-
-	// Expand the outer covering to a uniform resolution.
-	auto outer_uniform = a5_uncompact(outer.data, outer.len, resolution);
-	ThrowCellArrayError(outer_uniform, function_name);
-	a5_free_cell_array(outer);
-
-	// Collect the uniform-resolution cells of every hole.
-	std::unordered_set<uint64_t> holes;
-	for (size_t r = 1; r < rings.size(); r++) {
-		if (rings[r].empty()) {
+	vector<LonLatDegrees> points;
+	vector<uintptr_t> ring_lengths;
+	ring_lengths.reserve(rings.size());
+	for (const auto &ring : rings) {
+		if (ring.empty()) {
 			continue;
 		}
-		auto hole = a5_polygon_to_cells(rings[r].data(), rings[r].size(), resolution);
-		ThrowCellArrayError(hole, function_name);
-		auto hole_uniform = a5_uncompact(hole.data, hole.len, resolution);
-		ThrowCellArrayError(hole_uniform, function_name);
-		a5_free_cell_array(hole);
-		for (size_t i = 0; i < hole_uniform.len; i++) {
-			holes.insert(hole_uniform.data[i]);
-		}
-		a5_free_cell_array(hole_uniform);
+		ring_lengths.push_back(ring.size());
+		points.insert(points.end(), ring.begin(), ring.end());
 	}
 
-	// Difference, then re-compact so the output matches the no-hole convention.
-	vector<uint64_t> kept;
-	kept.reserve(outer_uniform.len);
-	for (size_t i = 0; i < outer_uniform.len; i++) {
-		if (holes.find(outer_uniform.data[i]) == holes.end()) {
-			kept.push_back(outer_uniform.data[i]);
-		}
+	auto cells = a5_polygon_to_cells(points.data(), ring_lengths.data(), ring_lengths.size(), resolution, overlapping);
+	ThrowCellArrayError(cells, function_name);
+	for (size_t i = 0; i < cells.len; i++) {
+		acc.Add(cells.data[i]);
 	}
-	a5_free_cell_array(outer_uniform);
-	if (kept.empty()) {
-		return;
-	}
-	auto compacted = a5_compact(kept.data(), kept.size());
-	ThrowCellArrayError(compacted, function_name);
-	for (size_t i = 0; i < compacted.len; i++) {
-		acc.Add(compacted.data[i]);
-	}
-	a5_free_cell_array(compacted);
+	a5_free_cell_array(cells);
 }
 
 // Recursively read a (possibly multi-part) geometry and accumulate its A5 cells.
 // Each MULTI* / GEOMETRYCOLLECTION part carries its own WKB header, so we recurse.
-static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccumulator &acc, int depth) {
+static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, bool overlapping, CellAccumulator &acc,
+                                   int depth) {
 	if (depth > 16) {
 		throw InvalidInputException(string(cur.function_name) + ": GEOMETRY nesting too deep");
 	}
@@ -760,7 +686,7 @@ static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccum
 		for (uint32_t r = 0; r < ring_count; r++) {
 			rings.push_back(WkbReadRing(cur, dims));
 		}
-		PolygonRingsToCells(rings, resolution, acc, cur.function_name);
+		PolygonRingsToCells(rings, resolution, overlapping, acc, cur.function_name);
 		break;
 	}
 	case GeometryType::MULTIPOINT:
@@ -769,7 +695,7 @@ static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, CellAccum
 	case GeometryType::GEOMETRYCOLLECTION: {
 		uint32_t part_count = cur.U32();
 		for (uint32_t p = 0; p < part_count; p++) {
-			WkbReadGeometryToCells(cur, resolution, acc, depth + 1);
+			WkbReadGeometryToCells(cur, resolution, overlapping, acc, depth + 1);
 		}
 		break;
 	}
@@ -794,18 +720,33 @@ static list_entry_t PushCells(Vector &result, uint64_t &offset, idx_t &result_si
 }
 
 // a5_geometry_to_cells: run any GEOMETRY through the recursive WKB reader, accumulating its cells.
+// `overlapping` (default false) selects gap-free (Containment::Overlapping) coverage for any
+// polygon parts of the geometry instead of the default cell-center (Containment::Center) containment.
 inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	static const char *function_name = "a5_geometry_to_cells";
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 	idx_t result_size = ListVector::GetListSize(result);
 
-	BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
-	    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+	if (args.ColumnCount() == 2) {
+		BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
+		    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+			    ValidateResolution(resolution, function_name);
+			    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
+			    CellAccumulator acc;
+			    WkbReadGeometryToCells(cur, resolution, false, acc, 0);
+			    return PushCells(result, offset, result_size, acc.cells);
+		    });
+		return;
+	}
+
+	TernaryExecutor::Execute<string_t, int32_t, bool, list_entry_t>(
+	    args.data[0], args.data[1], args.data[2], result, args.size(),
+	    [&](string_t geom, int32_t resolution, bool overlapping) {
 		    ValidateResolution(resolution, function_name);
 		    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 		    CellAccumulator acc;
-		    WkbReadGeometryToCells(cur, resolution, acc, 0);
+		    WkbReadGeometryToCells(cur, resolution, overlapping, acc, 0);
 		    return PushCells(result, offset, result_size, acc.cells);
 	    });
 }
@@ -820,6 +761,22 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"resolution"};
 		desc.parameter_types = {LogicalType::INTEGER};
 		desc.examples = {"a5_cell_area(10)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_edge_length_avg: Returns the average edge length of a cell at a given resolution
+	{
+		auto func = ScalarFunction("a5_cell_edge_length_avg", {LogicalType::INTEGER}, LogicalType::DOUBLE,
+		                           A5CellEdgeLengthAvgFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the average edge length in meters of an A5 cell at the specified resolution "
+		                   "level; individual edges vary from the average by roughly +/-10%";
+		desc.parameter_names = {"resolution"};
+		desc.parameter_types = {LogicalType::INTEGER};
+		desc.examples = {"a5_cell_edge_length_avg(10)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
@@ -1063,21 +1020,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// a5_cell_to_spherical: Returns the spherical coordinates of a cell center
-	{
-		auto func = ScalarFunction("a5_cell_to_spherical", {LogicalType::UBIGINT},
-		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToSphericalFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the spherical coordinates [theta, phi] in radians of an A5 cell center";
-		desc.parameter_names = {"cell"};
-		desc.parameter_types = {LogicalType::UBIGINT};
-		desc.examples = {"a5_cell_to_spherical(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
-		loader.RegisterFunction(std::move(info));
-	}
-
 	// a5_spherical_cap: Returns cells within a spherical cap radius
 	{
 		auto func = ScalarFunction("a5_spherical_cap", {LogicalType::UBIGINT, LogicalType::DOUBLE},
@@ -1153,38 +1095,37 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// a5_spherical_to_cell: Returns the cell containing the given spherical coordinates
-	{
-		auto func =
-		    ScalarFunction("a5_spherical_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-		                   LogicalType::UBIGINT, A5SphericalToCellFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the A5 cell at the given resolution containing the spherical coordinates "
-		                   "[theta, phi] (in radians); the inverse of a5_cell_to_spherical";
-		desc.parameter_names = {"theta", "phi", "resolution"};
-		desc.parameter_types = {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER};
-		desc.examples = {"a5_spherical_to_cell(2.14, 0.92, 10)"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
-		loader.RegisterFunction(std::move(info));
-	}
-
 	// a5_geometry_to_cells: Returns the cells covering any geometry
 	{
-		auto func = ScalarFunction("a5_geometry_to_cells", {LogicalType::GEOMETRY(), LogicalType::INTEGER},
-		                           LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
-		                   "their containing cell, lines are traced, and polygons are filled (holes excluded); MULTI* "
-		                   "and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are compacted - use "
-		                   "a5_uncompact to expand to a uniform resolution";
-		desc.parameter_names = {"geom", "resolution"};
-		desc.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
-		desc.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
+		ScalarFunctionSet func_set("a5_geometry_to_cells");
+		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN},
+		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		CreateScalarFunctionInfo info(func_set);
+
+		FunctionDescription desc1;
+		desc1.description =
+		    "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
+		    "their containing cell, lines are traced, and polygons are filled with cell-center containment "
+		    "(holes excluded); MULTI* and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are "
+		    "compacted - use a5_uncompact to expand to a uniform resolution";
+		desc1.parameter_names = {"geom", "resolution"};
+		desc1.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
+		desc1.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
+
+		FunctionDescription desc2;
+		desc2.description =
+		    "Returns the A5 cells covering an arbitrary geometry at the given resolution, as above. For "
+		    "polygon parts, setting overlapping to true additionally includes every cell that touches the "
+		    "polygon boundary, giving gap-free coverage instead of the default cell-center containment";
+		desc2.parameter_names = {"geom", "resolution", "overlapping"};
+		desc2.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN};
+		desc2.examples = {"a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 8, true)"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
 		loader.RegisterFunction(std::move(info));
 	}
 
