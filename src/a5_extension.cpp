@@ -11,13 +11,25 @@
 #include <unordered_set>
 namespace duckdb {
 
-#define MAX_RESOLUTION       30
-#define A5_EXTENSION_VERSION "2026082802"
+#define A5_EXTENSION_VERSION "2026101304"
+
+// The finest A5 resolution, as defined by the a5 crate.
+static const int32_t MAX_RESOLUTION = a5_max_resolution();
 
 // Helper function to validate resolution and throw with a clear error message
 inline void ValidateResolution(int32_t resolution, const char *function_name) {
 	if (resolution < 0 || resolution > MAX_RESOLUTION) {
-		throw InvalidInputException(string(function_name) + ": Resolution must be between 0 and 30");
+		throw InvalidInputException(string(function_name) + ": Resolution must be between 0 and " +
+		                            to_string(MAX_RESOLUTION));
+	}
+}
+
+// As ValidateResolution, but also accepts -1: the resolution of the world cell, which a5 takes
+// wherever a coarser resolution is asked for.
+inline void ValidateResolutionOrWorld(int32_t resolution, const char *function_name) {
+	if (resolution < -1 || resolution > MAX_RESOLUTION) {
+		throw InvalidInputException(string(function_name) + ": Resolution must be between -1 and " +
+		                            to_string(MAX_RESOLUTION));
 	}
 }
 
@@ -51,7 +63,7 @@ inline void ThrowLonLatArrayError(LonLatDegreesArray &arr, const char *function_
 inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
 	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
-		ValidateResolution(resolution, "a5_cell_area");
+		ValidateResolutionOrWorld(resolution, "a5_cell_area");
 		return a5_cell_area(resolution);
 	});
 }
@@ -95,11 +107,21 @@ inline void A5LonLatToCellFun(DataChunk &args, ExpressionState &state, Vector &r
 
 inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
+
+	if (args.ColumnCount() == 1) {
+		UnaryExecutor::Execute<uint64_t, uint64_t>(cell_vector, result, args.size(), [&](uint64_t cell) {
+			struct ResultU64 res = a5_cell_to_immediate_parent(cell);
+			ThrowRustError(res.error, "a5_cell_to_parent");
+			return res.value;
+		});
+		return;
+	}
+
 	auto &parent_resolution_vector = args.data[1];
 
 	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
 	    cell_vector, parent_resolution_vector, result, args.size(), [&](uint64_t cell, int32_t parent_resolution) {
-		    ValidateResolution(parent_resolution, "a5_cell_to_parent");
+		    ValidateResolutionOrWorld(parent_resolution, "a5_cell_to_parent");
 		    struct ResultU64 res = a5_cell_to_parent(cell, parent_resolution);
 		    ThrowRustError(res.error, "a5_cell_to_parent");
 		    return res.value;
@@ -297,7 +319,6 @@ inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result
 
 inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_list_vector = args.data[0];
-	auto &target_resolution_vector = args.data[1];
 
 	// Initial estimate; each cell expands to 4 children per resolution level
 	ListVector::Reserve(result, args.size() * 4);
@@ -307,13 +328,10 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 
 	auto result_size = ListVector::GetListSize(result);
 
-	BinaryExecutor::Execute<list_entry_t, int32_t, list_entry_t>(
-	    cell_list_vector, target_resolution_vector, result, args.size(),
-	    [&](list_entry_t cell_list_entry, int32_t target_resolution) {
-		    ValidateResolution(target_resolution, "a5_uncompact");
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(
+	    cell_list_vector, result, args.size(), [&](list_entry_t cell_list_entry) {
 		    // We need to prepare the list of values to pass in.
-		    auto compact_result =
-		        a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length, target_resolution);
+		    auto compact_result = a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
 		    ThrowCellArrayError(compact_result, "a5_uncompact");
 		    if (compact_result.len == 0) {
 			    a5_free_cell_array(compact_result);
@@ -371,7 +389,7 @@ inline void A5GetNumChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 
 	BinaryExecutor::Execute<int32_t, int32_t, uint64_t>(
 	    parent_res_vector, child_res_vector, result, args.size(), [&](int32_t parent_res, int32_t child_res) {
-		    ValidateResolution(parent_res, "a5_get_num_children");
+		    ValidateResolutionOrWorld(parent_res, "a5_get_num_children");
 		    ValidateResolution(child_res, "a5_get_num_children");
 		    return static_cast<uint64_t>(a5_get_num_children(parent_res, child_res));
 	    });
@@ -466,9 +484,142 @@ inline void A5WorldCellFun(DataChunk &args, ExpressionState &state, Vector &resu
 	result.Reference(Value::UBIGINT(a5_world_cell()));
 }
 
+inline void A5MaxResolutionFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	D_ASSERT(args.ColumnCount() == 0);
+	result.Reference(Value::INTEGER(MAX_RESOLUTION));
+}
+
 inline void A5IsValidCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
 	                                       [&](uint64_t cell) { return a5_is_valid_cell(cell); });
+}
+
+inline void A5IsCompactionMarkerFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
+	                                       [&](uint64_t value) { return a5_is_compaction_marker(value); });
+}
+
+inline void A5MigrateFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	UnaryExecutor::Execute<uint64_t, uint64_t>(args.data[0], result, args.size(), [&](uint64_t cell) {
+		struct ResultU64 res = a5_migrate(cell);
+		ThrowRustError(res.error, "a5_migrate");
+		return res.value;
+	});
+}
+
+inline void A5CellToSupercellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
+	    args.data[0], args.data[1], result, args.size(), [&](uint64_t cell, int32_t resolution) {
+		    ValidateResolutionOrWorld(resolution, "a5_cell_to_supercell");
+		    struct ResultU64 res = a5_cell_to_supercell(cell, resolution);
+		    ThrowRustError(res.error, "a5_cell_to_supercell");
+		    return res.value;
+	    });
+}
+
+// Append a Rust CellArray to the result list vector, then free it.
+static list_entry_t PushCellArray(Vector &result, uint64_t &offset, CellArray &cells, const char *function_name) {
+	ThrowCellArrayError(cells, function_name);
+	for (size_t i = 0; i < cells.len; i++) {
+		ListVector::PushBack(result, Value::UBIGINT(cells.data[i]));
+	}
+	list_entry_t out {offset, cells.len};
+	offset += cells.len;
+	a5_free_cell_array(cells);
+	return out;
+}
+
+// The cell IDs of a LIST(UBIGINT) vector, as a contiguous array indexed by list_entry_t offsets.
+static const uint64_t *CellListData(Vector &cell_list_vector) {
+	auto &child = ListVector::GetEntry(cell_list_vector);
+	child.Flatten(ListVector::GetListSize(cell_list_vector));
+	return FlatVector::GetData<uint64_t>(child);
+}
+
+inline void A5CellToSubcellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
+	    args.data[0], args.data[1], result, args.size(), [&](uint64_t cell, int32_t resolution) {
+		    ValidateResolution(resolution, "a5_cell_to_subcell");
+		    auto subcells = a5_cell_to_subcell(cell, resolution);
+		    return PushCellArray(result, offset, subcells, "a5_cell_to_subcell");
+	    });
+}
+
+inline void A5CoveringResolutionFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	UnaryExecutor::Execute<list_entry_t, int32_t>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+		return a5_covering_resolution(cell_list_data + cells.offset, cells.length);
+	});
+}
+
+inline void A5CountFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	UnaryExecutor::Execute<list_entry_t, uint64_t>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+		struct ResultU64 res = a5_count(cell_list_data + cells.offset, cells.length);
+		ThrowRustError(res.error, "a5_count");
+		return res.value;
+	});
+}
+
+inline void A5AreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	UnaryExecutor::Execute<list_entry_t, double>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+		struct ResultF64 res = a5_area(cell_list_data + cells.offset, cells.length);
+		ThrowRustError(res.error, "a5_area");
+		return res.value;
+	});
+}
+
+inline void A5ContainsFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	BinaryExecutor::Execute<list_entry_t, uint64_t, bool>(
+	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t cells, uint64_t cell) {
+		    struct ResultBool res = a5_contains(cell_list_data + cells.offset, cells.length, cell);
+		    ThrowRustError(res.error, "a5_contains");
+		    return res.value;
+	    });
+}
+
+inline void A5OverlapsFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto a_data = CellListData(args.data[0]);
+	auto b_data = CellListData(args.data[1]);
+	BinaryExecutor::Execute<list_entry_t, list_entry_t, bool>(
+	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t a, list_entry_t b) {
+		    struct ResultBool res = a5_overlaps(a_data + a.offset, a.length, b_data + b.offset, b.length);
+		    ThrowRustError(res.error, "a5_overlaps");
+		    return res.value;
+	    });
+}
+
+// Shared implementation of the covering set operations (union / intersect / difference).
+typedef CellArray (*a5_set_operation_t)(const uint64_t *a, uintptr_t a_len, const uint64_t *b, uintptr_t b_len);
+
+static void A5SetOperation(DataChunk &args, Vector &result, a5_set_operation_t operation, const char *function_name) {
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+
+	auto a_data = CellListData(args.data[0]);
+	auto b_data = CellListData(args.data[1]);
+	BinaryExecutor::Execute<list_entry_t, list_entry_t, list_entry_t>(
+	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t a, list_entry_t b) {
+		    auto cells = operation(a_data + a.offset, a.length, b_data + b.offset, b.length);
+		    return PushCellArray(result, offset, cells, function_name);
+	    });
+}
+
+inline void A5UnionFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	A5SetOperation(args, result, a5_union, "a5_union");
+}
+
+inline void A5IntersectFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	A5SetOperation(args, result, a5_intersect, "a5_intersect");
+}
+
+inline void A5DifferenceFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	A5SetOperation(args, result, a5_difference, "a5_difference");
 }
 
 // ---------------------------------------------------------------------------
@@ -545,13 +696,35 @@ inline void A5CellToPointFun(DataChunk &args, ExpressionState &state, Vector &re
 // ---------------------------------------------------------------------------
 
 // Ordered, de-duplicated accumulator of cell IDs.
+//
+// Polygon parts come back from a5 as coverings: compacted cells followed by a compaction
+// marker recording their resolution. The marker is not a cell, so it is kept apart (the
+// finest one, if parts disagree) and Finish() uses it to turn everything accumulated into a
+// single covering. Geometries without polygon parts never see a marker and keep their cells
+// as accumulated: uncompacted, in geometry order.
 struct CellAccumulator {
 	vector<uint64_t> cells;
 	std::unordered_set<uint64_t> seen;
+	uint64_t marker = 0;
 	void Add(uint64_t cell) {
+		if (a5_is_compaction_marker(cell)) {
+			// Markers differ only in their resolution bits, so the largest is the finest.
+			marker = MaxValue<uint64_t>(marker, cell);
+			return;
+		}
 		if (seen.insert(cell).second) {
 			cells.push_back(cell);
 		}
+	}
+	void Finish(const char *function_name) {
+		if (marker == 0) {
+			return;
+		}
+		cells.push_back(marker);
+		auto covering = a5_compact(cells.data(), cells.size());
+		ThrowCellArrayError(covering, function_name);
+		cells.assign(covering.data, covering.data + covering.len);
+		a5_free_cell_array(covering);
 	}
 };
 
@@ -607,10 +780,10 @@ static vector<LonLatDegrees> WkbReadRing(WkbCursor &cur, idx_t dims) {
 //
 // Holes are excluded by the a5 crate itself: we flatten all rings (outer first, then
 // holes) into a single point buffer plus a per-ring length array and hand them to
-// a5_polygon_to_cells, which returns the compacted covering of the outer ring with the
-// holes already removed. Empty rings are dropped so a degenerate ring never shifts the
-// outer-ring-is-first convention. `overlapping` selects gap-free (Containment::Overlapping)
-// coverage instead of the default cell-center (Containment::Center) containment.
+// a5_polygon_to_cells, which returns the covering (compacted cells, then a compaction
+// marker) of the outer ring with the holes already removed. Empty rings are dropped so a degenerate ring never shifts
+// the outer-ring-is-first convention. `overlapping` selects gap-free (Containment::Overlapping) coverage instead of the
+// default cell-center (Containment::Center) containment.
 static void PolygonRingsToCells(const vector<vector<LonLatDegrees>> &rings, int32_t resolution, bool overlapping,
                                 CellAccumulator &acc, const char *function_name) {
 	if (rings.empty() || rings[0].empty()) {
@@ -735,6 +908,7 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 			    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 			    CellAccumulator acc;
 			    WkbReadGeometryToCells(cur, resolution, false, acc, 0);
+			    acc.Finish(function_name);
 			    return PushCells(result, offset, result_size, acc.cells);
 		    });
 		return;
@@ -747,6 +921,7 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 		    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 		    CellAccumulator acc;
 		    WkbReadGeometryToCells(cur, resolution, overlapping, acc, 0);
+		    acc.Finish(function_name);
 		    return PushCells(result, offset, result_size, acc.cells);
 	    });
 }
@@ -757,7 +932,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Returns the area in square meters of an A5 cell at the specified resolution level";
+		desc.description =
+		    "Returns the area in square meters of an A5 cell at the specified resolution level (-1 gives the "
+		    "world cell, i.e. the whole globe)";
 		desc.parameter_names = {"resolution"};
 		desc.parameter_types = {LogicalType::INTEGER};
 		desc.examples = {"a5_cell_area(10)"};
@@ -829,16 +1006,29 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_parent: Returns the parent cell at a given resolution
 	{
-		auto func = ScalarFunction("a5_cell_to_parent", {LogicalType::UBIGINT, LogicalType::INTEGER},
-		                           LogicalType::UBIGINT, A5CellToParentFun);
-		CreateScalarFunctionInfo info(func);
-		FunctionDescription desc;
-		desc.description = "Returns the parent A5 cell at the specified coarser resolution";
-		desc.parameter_names = {"cell", "parent_resolution"};
-		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
-		desc.examples = {"a5_cell_to_parent(a5_lonlat_to_cell(-122.4, 37.8, 10), 5)"};
-		desc.categories = {"a5", "geospatial"};
-		info.descriptions.push_back(std::move(desc));
+		ScalarFunctionSet func_set("a5_cell_to_parent");
+		func_set.AddFunction(
+		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::UBIGINT, A5CellToParentFun));
+		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::UBIGINT, A5CellToParentFun));
+		CreateScalarFunctionInfo info(func_set);
+
+		FunctionDescription desc1;
+		desc1.description = "Returns the parent A5 cell at the specified coarser resolution (-1 gives the world "
+		                    "cell)";
+		desc1.parameter_names = {"cell", "parent_resolution"};
+		desc1.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc1.examples = {"a5_cell_to_parent(a5_lonlat_to_cell(-122.4, 37.8, 10), 5)"};
+		desc1.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc1));
+
+		FunctionDescription desc2;
+		desc2.description = "Returns the immediate parent A5 cell (one resolution coarser)";
+		desc2.parameter_names = {"cell"};
+		desc2.parameter_types = {LogicalType::UBIGINT};
+		desc2.examples = {"a5_cell_to_parent(a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc2.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc2));
+
 		loader.RegisterFunction(std::move(info));
 	}
 
@@ -952,7 +1142,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Compacts a list of A5 cells by merging complete sets of sibling cells into parent cells";
+		desc.description = "Compacts a list of A5 cells by merging complete sets of sibling cells into parent cells. "
+		                   "The result is a covering: compacted cells sorted in curve order, followed by a "
+		                   "compaction marker recording the resolution - use a5_uncompact to expand it";
 		desc.parameter_names = {"cells"};
 		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
 		desc.examples = {"a5_compact(a5_cell_to_children(a5_lonlat_to_cell(-122.4, 37.8, 5)))"};
@@ -961,16 +1153,18 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// a5_uncompact: Uncompacts cells to a target resolution
+	// a5_uncompact: Uncompacts cells to the resolution of the set
 	{
-		auto func = ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER},
+		auto func = ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Expands a compacted list of A5 cells to the specified target resolution";
-		desc.parameter_names = {"cells", "target_resolution"};
-		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER};
-		desc.examples = {"a5_uncompact([a5_lonlat_to_cell(-122.4, 37.8, 5)], 7)"};
+		desc.description = "Expands a list of A5 cells to all their cells at the resolution of the list: the "
+		                   "resolution of its compaction marker, or of its finest cell when it has none. The "
+		                   "compaction marker is dropped from the result";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_uncompact(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
@@ -1011,7 +1205,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description =
-		    "Returns the number of child cells at child_resolution that fit within a cell at parent_resolution";
+		    "Returns the number of child cells at child_resolution that fit within a cell at parent_resolution "
+		    "(-1 for the world cell)";
 		desc.parameter_names = {"parent_resolution", "child_resolution"};
 		desc.parameter_types = {LogicalType::INTEGER, LogicalType::INTEGER};
 		desc.examples = {"a5_get_num_children(0, 1)"};
@@ -1026,7 +1221,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5SphericalCapFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Returns all A5 cells within the specified radius (in meters) of the given cell";
+		desc.description = "Returns all A5 cells within the specified radius (in meters) of the given cell, as a "
+		                   "covering: compacted cells sorted in curve order, followed by a compaction marker "
+		                   "recording the resolution - use a5_uncompact to expand it";
 		desc.parameter_names = {"cell", "radius"};
 		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::DOUBLE};
 		desc.examples = {"a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 1000.0)"};
@@ -1041,7 +1238,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Returns all A5 cells within k edge-steps of the given cell (edge adjacency)";
+		desc.description = "Returns all A5 cells within k edge-steps of the given cell (edge adjacency), as a "
+		                   "covering: compacted cells sorted in curve order, followed by a compaction marker "
+		                   "recording the resolution - use a5_uncompact to expand it";
 		desc.parameter_names = {"cell", "k"};
 		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
 		desc.examples = {"a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)"};
@@ -1056,7 +1255,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskVertexFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
-		desc.description = "Returns all A5 cells within k vertex-steps of the given cell (vertex adjacency)";
+		desc.description = "Returns all A5 cells within k vertex-steps of the given cell (vertex adjacency), as a "
+		                   "covering: compacted cells sorted in curve order, followed by a compaction marker "
+		                   "recording the resolution - use a5_uncompact to expand it";
 		desc.parameter_names = {"cell", "k"};
 		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
 		desc.examples = {"a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)"};
@@ -1080,6 +1281,20 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
+	// a5_max_resolution: Returns the finest A5 resolution
+	{
+		auto func = ScalarFunction("a5_max_resolution", {}, LogicalType::INTEGER, A5MaxResolutionFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the finest A5 resolution level (30). Resolutions run from 0 to this value";
+		desc.parameter_names = {};
+		desc.parameter_types = {};
+		desc.examples = {"a5_max_resolution()"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
 	// a5_is_valid_cell: Returns whether a value is a valid A5 cell ID
 	{
 		auto func = ScalarFunction("a5_is_valid_cell", {LogicalType::UBIGINT}, LogicalType::BOOLEAN, A5IsValidCellFun);
@@ -1090,6 +1305,219 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc.parameter_names = {"cell"};
 		desc.parameter_types = {LogicalType::UBIGINT};
 		desc.examples = {"a5_is_valid_cell(a5_lonlat_to_cell(-122.4, 37.8, 5))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_is_compaction_marker: Returns whether a value is a compaction marker
+	{
+		auto func = ScalarFunction("a5_is_compaction_marker", {LogicalType::UBIGINT}, LogicalType::BOOLEAN,
+		                           A5IsCompactionMarkerFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns true if the value is a compaction marker: the last element of a covering (as "
+		                   "returned by a5_compact, a5_grid_disk, a5_spherical_cap, a5_cell_to_subcell, polygon "
+		                   "coverings and the set operations), recording the resolution its cells stand for. A "
+		                   "compaction marker is not a cell";
+		desc.parameter_names = {"value"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {
+		    "list_filter(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), x -> NOT a5_is_compaction_marker(x))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_covering_resolution: Returns the resolution of a set of cells
+	{
+		auto func = ScalarFunction("a5_covering_resolution", {LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::INTEGER, A5CoveringResolutionFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the resolution of a list of A5 cells: the resolution of its compaction marker, or "
+		                   "of its finest cell when it has none. Returns -1 for an empty list";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_covering_resolution(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_count: Returns the number of cells in a set at its resolution
+	{
+		auto func =
+		    ScalarFunction("a5_count", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::UBIGINT, A5CountFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the number of cells in a list of A5 cells at its resolution, i.e. the length of "
+		                   "the uncompacted list. Overlapping cells are counted more than once - use a5_union to "
+		                   "merge them first";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_count(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_area: Returns the area of a set of cells
+	{
+		auto func =
+		    ScalarFunction("a5_area", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::DOUBLE, A5AreaFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the total area in square meters of a list of A5 cells (compacted or not). "
+		                   "Overlapping cells each add their area - use a5_union to merge them first";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_area(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_contains: Returns whether a cell is in a set of cells
+	{
+		auto func = ScalarFunction("a5_contains", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::UBIGINT},
+		                           LogicalType::BOOLEAN, A5ContainsFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns true if the cell is in the list of A5 cells (compacted or not). The cell must be "
+		                   "at the resolution of the list, and the list must be sorted in curve order, as coverings "
+		                   "are";
+		desc.parameter_names = {"cells", "cell"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::UBIGINT};
+		desc.examples = {"a5_contains(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0), "
+		                 "a5_lonlat_to_cell(-122.4, 37.8, 10))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_overlaps: Returns whether two sets of cells share any cell
+	{
+		auto func = ScalarFunction("a5_overlaps",
+		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::BOOLEAN, A5OverlapsFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns true if two lists of A5 cells (compacted or not) share any cell. Both lists must "
+		                   "be at the same resolution";
+		desc.parameter_names = {"a", "b"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_overlaps(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), "
+		                 "a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_union: Returns the union of two sets of cells
+	{
+		auto func = ScalarFunction("a5_union",
+		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5UnionFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the union of two lists of A5 cells: the cells in either. Both lists must be at the "
+		                   "same resolution. The result is a covering: compacted cells sorted in curve order, "
+		                   "followed by a compaction marker recording the resolution - use a5_uncompact to expand it";
+		desc.parameter_names = {"a", "b"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_union(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), "
+		                 "a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_intersect: Returns the intersect of two sets of cells
+	{
+		auto func = ScalarFunction("a5_intersect",
+		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5IntersectFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the intersection of two lists of A5 cells: the cells in both. Both lists must be "
+		                   "at the same resolution. The result is a covering: compacted cells sorted in curve order, "
+		                   "followed by a compaction marker recording the resolution - use a5_uncompact to expand it";
+		desc.parameter_names = {"a", "b"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_intersect(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), "
+		                 "a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_difference: Returns the difference of two sets of cells
+	{
+		auto func = ScalarFunction("a5_difference",
+		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5DifferenceFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the difference of two lists of A5 cells: the cells in a but not in b. Both lists "
+		                   "must be at the same resolution. The result is a covering: compacted cells sorted in "
+		                   "curve order, followed by a compaction marker recording the resolution - use a5_uncompact "
+		                   "to expand it";
+		desc.parameter_names = {"a", "b"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_difference(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), "
+		                 "a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 5000.0))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_to_supercell: Returns the coarser cell containing the center of a cell
+	{
+		auto func = ScalarFunction("a5_cell_to_supercell", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::UBIGINT, A5CellToSupercellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the A5 cell at the specified coarser resolution that contains the center of the "
+		                   "cell: the spatial counterpart of a5_cell_to_parent, whose result need not contain the "
+		                   "cell (-1 gives the world cell)";
+		desc.parameter_names = {"cell", "resolution"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc.examples = {"a5_cell_to_supercell(a5_lonlat_to_cell(-122.4, 37.8, 10), 5)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cell_to_subcell: Returns the finer cells whose centers lie in a cell
+	{
+		auto func = ScalarFunction("a5_cell_to_subcell", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Returns the A5 cells at the specified finer resolution whose centers lie in the cell: the "
+		                   "spatial counterpart of a5_cell_to_children and the inverse of a5_cell_to_supercell. The "
+		                   "result is a covering: compacted cells sorted in curve order, followed by a compaction "
+		                   "marker recording the resolution - use a5_uncompact to expand it";
+		desc.parameter_names = {"cell", "resolution"};
+		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
+		desc.examples = {"a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_migrate: Migrates a cell ID from the a5 0.x index to the a5 1.0 index
+	{
+		auto func = ScalarFunction("a5_migrate", {LogicalType::UBIGINT}, LogicalType::UBIGINT, A5MigrateFun);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description = "Migrates an A5 cell ID created by a pre-1.0 version of A5 (a5 crate <= 0.10) to the ID of "
+		                   "the same cell in the current index. Cell IDs changed in A5 1.0, so stored cell IDs must "
+		                   "be migrated once";
+		desc.parameter_names = {"cell"};
+		desc.parameter_types = {LogicalType::UBIGINT};
+		desc.examples = {"a5_migrate(2742821848331845632)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
@@ -1108,8 +1536,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc1.description =
 		    "Returns the A5 cells covering an arbitrary geometry at the given resolution. Points map to "
 		    "their containing cell, lines are traced, and polygons are filled with cell-center containment "
-		    "(holes excluded); MULTI* and GEOMETRYCOLLECTION inputs are unioned. Polygon coverings are "
-		    "compacted - use a5_uncompact to expand to a uniform resolution";
+		    "(holes excluded); MULTI* and GEOMETRYCOLLECTION inputs are unioned. A geometry with polygon "
+		    "parts gives a covering: compacted cells sorted in curve order, followed by a compaction marker "
+		    "recording the resolution - use a5_uncompact to expand it. Other geometries give their cells at "
+		    "the resolution, in geometry order";
 		desc1.parameter_names = {"geom", "resolution"};
 		desc1.parameter_types = {LogicalType::GEOMETRY(), LogicalType::INTEGER};
 		desc1.examples = {"a5_geometry_to_cells('MULTIPOINT((0 0), (10 10))'::GEOMETRY, 8)"};

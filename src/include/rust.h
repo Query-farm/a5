@@ -42,11 +42,23 @@ struct CellBoundaryOptions {
   int32_t segments;
 };
 
+struct ResultF64 {
+  double value;
+  char *error;
+};
+
+struct ResultBool {
+  bool value;
+  char *error;
+};
+
 extern "C" {
 
 ResultU64 a5_lon_lat_to_cell(double longitude, double latitude, int32_t resolution);
 
 ResultU64 a5_cell_to_parent(uint64_t index, int32_t parent_resolution);
+
+ResultU64 a5_cell_to_immediate_parent(uint64_t index);
 
 double a5_cell_area(int32_t resolution);
 
@@ -70,7 +82,7 @@ CellArray a5_get_res0_cells();
 
 CellArray a5_compact(const uint64_t *cells, uintptr_t len);
 
-CellArray a5_uncompact(const uint64_t *cells, uintptr_t len, int32_t target_resolution);
+CellArray a5_uncompact(const uint64_t *cells, uintptr_t len);
 
 void a5_free_string(char *ptr);
 
@@ -86,6 +98,8 @@ CellArray a5_grid_disk(uint64_t cell_id, uintptr_t k);
 
 CellArray a5_grid_disk_vertex(uint64_t cell_id, uintptr_t k);
 
+int32_t a5_max_resolution();
+
 uint64_t a5_world_cell();
 
 bool a5_is_valid_cell(uint64_t index);
@@ -97,5 +111,29 @@ CellArray a5_polygon_to_cells(const LonLatDegrees *points,
                               uintptr_t ring_count,
                               int32_t resolution,
                               bool overlapping);
+
+bool a5_is_compaction_marker(uint64_t value);
+
+int32_t a5_covering_resolution(const uint64_t *cells, uintptr_t len);
+
+ResultU64 a5_count(const uint64_t *cells, uintptr_t len);
+
+ResultF64 a5_area(const uint64_t *cells, uintptr_t len);
+
+CellArray a5_union(const uint64_t *a, uintptr_t a_len, const uint64_t *b, uintptr_t b_len);
+
+CellArray a5_intersect(const uint64_t *a, uintptr_t a_len, const uint64_t *b, uintptr_t b_len);
+
+CellArray a5_difference(const uint64_t *a, uintptr_t a_len, const uint64_t *b, uintptr_t b_len);
+
+ResultBool a5_overlaps(const uint64_t *a, uintptr_t a_len, const uint64_t *b, uintptr_t b_len);
+
+ResultBool a5_contains(const uint64_t *cells, uintptr_t len, uint64_t cell);
+
+ResultU64 a5_cell_to_supercell(uint64_t cell, int32_t resolution);
+
+CellArray a5_cell_to_subcell(uint64_t cell, int32_t resolution);
+
+ResultU64 a5_migrate(uint64_t cell);
 
 }  // extern "C"

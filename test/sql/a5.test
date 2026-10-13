@@ -52,7 +52,7 @@ query R
 select round(a5_cell_edge_length_avg(columns(*)::integer), 4) from range(31)
 ----
 4649142.3229
-4320430.2
+2343318.7689
 1190173.8478
 597565.2379
 299147.0769
@@ -122,9 +122,9 @@ select a5_get_num_cells(columns(*)::integer) from range(31)
 16888498602639360
 67553994410557440
 270215977642229760
-1080863910568919000
-4323455642275676000
-17293822569102705000
+1080863910568919040
+4323455642275676160
+17293822569102704640
 
 # Get the resolution from a cell.
 query I
@@ -166,7 +166,7 @@ query I
 select a5_lonlat_to_cell(44, 55, columns(*)::integer) from range(30);
 ----
 1585267068834414592
-7277816997830721536
+648518346341351424
 7241788200811757568
 7268809798575980544
 7271061598389665792
@@ -174,33 +174,33 @@ select a5_lonlat_to_cell(44, 55, columns(*)::integer) from range(30);
 7270639385924599808
 7270604201552510976
 7270630589831577600
-7270689963459477504
-7270689413703663616
-7270689551142617088
-7270689516782878720
-7270689525372813312
-7270689514635395072
-7270689517319749632
-7270689517722402816
-7270689517554630656
-7270689517579796480
-7270689517586087936
-7270689517588709376
-7270689517589102592
-7270689517588938752
-7270689517588963328
-7270689517588985856
-7270689517588985344
-7270689517588987008
-7270689517588985376
-7270689517588985384
-7270689517588985382
+7270645982994366464
+7270645433238552576
+7270645570677506048
+7270645536317767680
+7270645544907702272
+7270645534170284032
+7270645536854638592
+7270645537257291776
+7270645537089519616
+7270645537114685440
+7270645537120976896
+7270645537123598336
+7270645537123991552
+7270645537123827712
+7270645537123852288
+7270645537123874816
+7270645537123874304
+7270645537123875968
+7270645537123874336
+7270645537123874344
+7270645537123874342
 
 # Get the parent cell from a A5 cell.
 query I
 select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, columns(*)::integer), columns(*)::integer-1) from range(1, 30);
 ----
-1585267068834414592
+144115188075855872
 7277816997830721536
 7241788200811757568
 7268809798575980544
@@ -208,33 +208,33 @@ select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, columns(*)::integer), columns
 7270498648436244480
 7270639385924599808
 7270604201552510976
-7270683366389710848
-7270689963459477504
-7270689413703663616
-7270689551142617088
-7270689516782878720
-7270689508192944128
-7270689518930362368
-7270689517319749632
-7270689517453967360
-7270689517554630656
-7270689517579796480
-7270689517590282240
-7270689517588709376
-7270689517588840448
-7270689517588938752
-7270689517588979712
-7270689517588985856
-7270689517588987392
-7270689517588985472
-7270689517588985376
-7270689517588985384
+7270648182017622016
+7270645982994366464
+7270645433238552576
+7270645570677506048
+7270645536317767680
+7270645527727833088
+7270645538465251328
+7270645536854638592
+7270645536988856320
+7270645537089519616
+7270645537114685440
+7270645537125171200
+7270645537123598336
+7270645537123729408
+7270645537123827712
+7270645537123868672
+7270645537123874816
+7270645537123876352
+7270645537123874432
+7270645537123874336
+7270645537123874344
 
 # a5_lon_lat get the center of the A5 cell.
 query I
 select list_transform(a5_cell_to_lonlat(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> round(x)) from range(1, 30);
 ----
-[51.0, 48.0]
+[30.0, 68.0]
 [40.0, 52.0]
 [45.0, 56.0]
 [43.0, 55.0]
@@ -274,8 +274,8 @@ select a5_get_res0_cells()
 query I
 select a5_cell_to_children(a5_lonlat_to_cell(44, 55, columns(*)::integer), columns(*)::integer+1)  from range(0, 29);
 ----
-[7566047373982433280, 7854277750134145024, 8142508126285856768, 8430738502437568512, 7277816997830721536]
-[7241788200811757568, 7313845794849685504, 7385903388887613440, 7457960982925541376]
+[7277816997830721536, 7566047373982433280, 7854277750134145024, 8142508126285856768, 8430738502437568512]
+[612489549322387456, 684547143360315392, 756604737398243328, 828662331436171264]
 [7214766603047534592, 7232781001557016576, 7250795400066498560, 7268809798575980544]
 [7262054399134924800, 7266557998762295296, 7271061598389665792, 7275565198017036288]
 [7269372748529401856, 7270498648436244480, 7271624548343087104, 7272750448249929728]
@@ -283,33 +283,33 @@ select a5_cell_to_children(a5_lonlat_to_cell(44, 55, columns(*)::integer), colum
 [7270533832808333312, 7270604201552510976, 7270674570296688640, 7270744939040866304]
 [7270577813273444352, 7270595405459488768, 7270612997645533184, 7270630589831577600]
 [7270623992761810944, 7270628390808322048, 7270632788854833152, 7270637186901344256]
-[7270688314192035840, 7270689413703663616, 7270690513215291392, 7270691612726919168]
-[7270689001386803200, 7270689276264710144, 7270689551142617088, 7270689826020524032]
-[7270689448063401984, 7270689516782878720, 7270689585502355456, 7270689654221832192]
-[7270689491013074944, 7270689508192944128, 7270689525372813312, 7270689542552682496]
-[7270689518930362368, 7270689523225329664, 7270689527520296960, 7270689531815264256]
-[7270689513024782336, 7270689514098524160, 7270689515172265984, 7270689516246007808]
-[7270689516917096448, 7270689517185531904, 7270689517453967360, 7270689517722402816]
-[7270689517621739520, 7270689517688848384, 7270689517755957248, 7270689517823066112]
-[7270689517529464832, 7270689517546242048, 7270689517563019264, 7270689517579796480]
-[7270689517573505024, 7270689517577699328, 7270689517581893632, 7270689517586087936]
-[7270689517584515072, 7270689517585563648, 7270689517586612224, 7270689517587660800]
-[7270689517588316160, 7270689517588578304, 7270689517588840448, 7270689517589102592]
-[7270689517589004288, 7270689517589069824, 7270689517589135360, 7270689517589200896]
-[7270689517588914176, 7270689517588930560, 7270689517588946944, 7270689517588963328]
-[7270689517588957184, 7270689517588961280, 7270689517588965376, 7270689517588969472]
-[7270689517588984320, 7270689517588985344, 7270689517588986368, 7270689517588987392]
-[7270689517588984960, 7270689517588985216, 7270689517588985472, 7270689517588985728]
-[7270689517588986912, 7270689517588986976, 7270689517588987040, 7270689517588987104]
-[7270689517588985352, 7270689517588985368, 7270689517588985384, 7270689517588985400]
-[7270689517588985378, 7270689517588985382, 7270689517588985386, 7270689517588985390]
+[7270644333726924800, 7270645433238552576, 7270646532750180352, 7270647632261808128]
+[7270645020921692160, 7270645295799599104, 7270645570677506048, 7270645845555412992]
+[7270645467598290944, 7270645536317767680, 7270645605037244416, 7270645673756721152]
+[7270645510547963904, 7270645527727833088, 7270645544907702272, 7270645562087571456]
+[7270645538465251328, 7270645542760218624, 7270645547055185920, 7270645551350153216]
+[7270645532559671296, 7270645533633413120, 7270645534707154944, 7270645535780896768]
+[7270645536451985408, 7270645536720420864, 7270645536988856320, 7270645537257291776]
+[7270645537156628480, 7270645537223737344, 7270645537290846208, 7270645537357955072]
+[7270645537064353792, 7270645537081131008, 7270645537097908224, 7270645537114685440]
+[7270645537108393984, 7270645537112588288, 7270645537116782592, 7270645537120976896]
+[7270645537119404032, 7270645537120452608, 7270645537121501184, 7270645537122549760]
+[7270645537123205120, 7270645537123467264, 7270645537123729408, 7270645537123991552]
+[7270645537123893248, 7270645537123958784, 7270645537124024320, 7270645537124089856]
+[7270645537123803136, 7270645537123819520, 7270645537123835904, 7270645537123852288]
+[7270645537123846144, 7270645537123850240, 7270645537123854336, 7270645537123858432]
+[7270645537123873280, 7270645537123874304, 7270645537123875328, 7270645537123876352]
+[7270645537123873920, 7270645537123874176, 7270645537123874432, 7270645537123874688]
+[7270645537123875872, 7270645537123875936, 7270645537123876000, 7270645537123876064]
+[7270645537123874312, 7270645537123874328, 7270645537123874344, 7270645537123874360]
+[7270645537123874338, 7270645537123874342, 7270645537123874346, 7270645537123874350]
 
 
 # Get the coordinates of the boundary of any A5 cell with at_boundary
 query I
 select list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> list_transform(x, y-> round(y, 3))) from range(1, 30);
 ----
-[[51.0, 26.668], [51.76, 27.597], [52.534, 28.521], [53.32, 29.441], [54.122, 30.357], [54.939, 31.268], [55.772, 32.173], [56.622, 33.074], [57.49, 33.97], [58.377, 34.859], [59.284, 35.743], [60.212, 36.621], [61.163, 37.492], [62.137, 38.356], [63.135, 39.214], [64.16, 40.063], [65.212, 40.904], [66.292, 41.737], [67.402, 42.561], [68.544, 43.375], [69.719, 44.179], [70.929, 44.972], [72.174, 45.754], [73.458, 46.523], [74.781, 47.28], [76.146, 48.022], [77.554, 48.75], [79.007, 49.462], [80.506, 50.157], [82.053, 50.834], [83.65, 51.492], [85.299, 52.13], [87.0, 52.746], [85.144, 53.372], [83.226, 53.971], [81.248, 54.54], [79.21, 55.077], [77.111, 55.581], [74.955, 56.049], [72.743, 56.48], [70.477, 56.871], [68.162, 57.221], [65.801, 57.528], [63.4, 57.79], [60.964, 58.007], [58.499, 58.177], [56.012, 58.299], [53.51, 58.373], [51.0, 58.397], [48.49, 58.373], [45.988, 58.299], [43.501, 58.177], [41.036, 58.007], [38.6, 57.79], [36.199, 57.528], [33.838, 57.221], [31.523, 56.871], [29.257, 56.48], [27.045, 56.049], [24.889, 55.581], [22.79, 55.077], [20.752, 54.54], [18.774, 53.971], [16.856, 53.372], [15.0, 52.746], [16.701, 52.13], [18.35, 51.492], [19.947, 50.834], [21.494, 50.157], [22.993, 49.462], [24.446, 48.75], [25.854, 48.022], [27.219, 47.28], [28.542, 46.523], [29.826, 45.754], [31.071, 44.972], [32.281, 44.179], [33.456, 43.375], [34.598, 42.561], [35.708, 41.737], [36.788, 40.904], [37.84, 40.063], [38.865, 39.214], [39.863, 38.356], [40.837, 37.492], [41.788, 36.621], [42.716, 35.743], [43.623, 34.859], [44.51, 33.97], [45.378, 33.074], [46.228, 32.173], [47.061, 31.268], [47.878, 30.357], [48.68, 29.441], [49.466, 28.521], [50.24, 27.597], [51.0, 26.668]]
+[[60.65, 68.51], [60.65, 69.19], [60.65, 69.868], [60.65, 70.547], [60.65, 71.224], [60.65, 71.901], [60.65, 72.577], [60.65, 73.252], [60.65, 73.927], [60.65, 74.601], [60.65, 75.275], [60.65, 75.948], [60.65, 76.621], [60.65, 77.293], [60.65, 77.964], [60.65, 78.635], [60.65, 79.306], [60.65, 79.976], [60.65, 80.646], [60.65, 81.316], [60.65, 81.985], [60.65, 82.654], [60.65, 83.323], [60.65, 83.991], [60.65, 84.659], [60.65, 85.327], [60.65, 85.995], [60.65, 86.663], [60.65, 87.33], [60.65, 87.998], [60.65, 88.665], [60.65, 89.333], [-93.0, 90.0], [-11.35, 89.333], [-11.35, 88.665], [-11.35, 87.998], [-11.35, 87.33], [-11.35, 86.663], [-11.35, 85.995], [-11.35, 85.327], [-11.35, 84.659], [-11.35, 83.991], [-11.35, 83.323], [-11.35, 82.654], [-11.35, 81.985], [-11.35, 81.316], [-11.35, 80.646], [-11.35, 79.976], [-11.35, 79.306], [-11.35, 78.635], [-11.35, 77.964], [-11.35, 77.293], [-11.35, 76.621], [-11.35, 75.948], [-11.35, 75.275], [-11.35, 74.601], [-11.35, 73.927], [-11.35, 73.252], [-11.35, 72.577], [-11.35, 71.901], [-11.35, 71.224], [-11.35, 70.547], [-11.35, 69.868], [-11.35, 69.19], [-11.35, 68.51], [-10.0, 68.111], [-8.699, 67.704], [-7.445, 67.287], [-6.236, 66.862], [-5.07, 66.428], [-3.946, 65.987], [-2.862, 65.539], [-1.816, 65.084], [-0.808, 64.622], [0.164, 64.154], [1.102, 63.68], [2.008, 63.201], [2.882, 62.716], [3.726, 62.227], [4.541, 61.732], [5.329, 61.233], [6.09, 60.729], [6.826, 60.221], [7.538, 59.709], [8.227, 59.193], [8.893, 58.674], [9.539, 58.15], [10.164, 57.624], [10.769, 57.094], [11.356, 56.561], [11.924, 56.024], [12.476, 55.485], [13.011, 54.943], [13.531, 54.398], [14.035, 53.85], [14.524, 53.299], [15.0, 52.746], [16.025, 52.711], [17.049, 52.669], [18.07, 52.619], [19.089, 52.561], [20.105, 52.495], [21.119, 52.422], [22.129, 52.341], [23.135, 52.252], [24.138, 52.156], [25.137, 52.052], [26.132, 51.94], [27.123, 51.821], [28.109, 51.695], [29.09, 51.561], [30.066, 51.419], [31.037, 51.27], [32.003, 51.113], [32.963, 50.949], [33.918, 50.778], [34.867, 50.599], [35.809, 50.413], [36.746, 50.219], [37.676, 50.017], [38.599, 49.809], [39.517, 49.593], [40.427, 49.369], [41.33, 49.138], [42.227, 48.9], [43.116, 48.654], [43.998, 48.401], [44.872, 48.141], [45.74, 47.872], [46.009, 48.534], [46.285, 49.195], [46.568, 49.855], [46.857, 50.514], [47.153, 51.173], [47.456, 51.832], [47.768, 52.49], [48.087, 53.147], [48.415, 53.805], [48.752, 54.462], [49.099, 55.118], [49.456, 55.775], [49.824, 56.431], [50.203, 57.086], [50.595, 57.742], [51.0, 58.397], [51.42, 59.051], [51.858, 59.702], [52.314, 60.351], [52.791, 60.997], [53.288, 61.641], [53.808, 62.281], [54.352, 62.919], [54.922, 63.554], [55.519, 64.186], [56.145, 64.815], [56.803, 65.44], [57.494, 66.062], [58.222, 66.68], [58.989, 67.294], [59.797, 67.904], [60.65, 68.51]]
 [[31.037, 51.27], [31.476, 50.632], [31.901, 49.993], [32.313, 49.352], [32.714, 48.71], [33.103, 48.067], [33.482, 47.423], [33.851, 46.777], [34.209, 46.13], [34.559, 45.482], [34.9, 44.832], [35.233, 44.181], [35.557, 43.529], [35.875, 42.875], [36.186, 42.22], [36.49, 41.563], [36.788, 40.904], [37.415, 41.379], [38.056, 41.844], [38.713, 42.301], [39.383, 42.749], [40.067, 43.188], [40.764, 43.619], [41.474, 44.042], [42.197, 44.456], [42.931, 44.862], [43.677, 45.259], [44.435, 45.649], [45.204, 46.03], [45.984, 46.404], [46.774, 46.769], [47.576, 47.127], [48.387, 47.476], [48.521, 48.155], [48.658, 48.834], [48.798, 49.514], [48.941, 50.194], [49.088, 50.874], [49.238, 51.555], [49.392, 52.237], [49.551, 52.918], [49.713, 53.601], [49.881, 54.284], [50.053, 54.968], [50.23, 55.652], [50.413, 56.337], [50.602, 57.023], [50.798, 57.71], [51.0, 58.397], [49.94, 58.72], [48.858, 59.034], [47.756, 59.339], [46.632, 59.634], [45.487, 59.919], [44.321, 60.194], [43.134, 60.459], [41.926, 60.714], [40.699, 60.957], [39.451, 61.19], [38.185, 61.412], [36.899, 61.623], [35.595, 61.821], [34.273, 62.009], [32.935, 62.184], [31.58, 62.348], [31.572, 61.667], [31.564, 60.986], [31.556, 60.303], [31.549, 59.619], [31.542, 58.934], [31.535, 58.247], [31.529, 57.56], [31.523, 56.871], [31.462, 56.172], [31.401, 55.474], [31.34, 54.774], [31.279, 54.075], [31.218, 53.375], [31.157, 52.674], [31.097, 51.972], [31.037, 51.27]]
 [[40.144, 55.279], [40.496, 54.617], [40.836, 53.955], [41.165, 53.294], [41.484, 52.632], [41.792, 51.97], [42.09, 51.309], [42.38, 50.647], [42.661, 49.985], [43.476, 50.378], [44.304, 50.764], [45.145, 51.142], [46.0, 51.512], [46.868, 51.875], [47.749, 52.231], [48.643, 52.578], [49.551, 52.918], [49.713, 53.601], [49.881, 54.284], [50.053, 54.968], [50.23, 55.652], [50.413, 56.337], [50.602, 57.023], [50.798, 57.71], [51.0, 58.397], [49.94, 58.72], [48.858, 59.034], [47.756, 59.339], [46.632, 59.634], [45.487, 59.919], [44.321, 60.194], [43.134, 60.459], [41.926, 60.714], [41.689, 60.039], [41.462, 59.364], [41.245, 58.686], [41.036, 58.007], [40.804, 57.325], [40.578, 56.643], [40.358, 55.961], [40.144, 55.279]]
 [[41.036, 58.007], [41.01, 57.309], [40.982, 56.611], [40.954, 55.914], [40.925, 55.218], [41.443, 54.603], [41.945, 53.986], [42.433, 53.369], [42.907, 52.751], [43.77, 53.139], [44.648, 53.521], [45.541, 53.895], [46.449, 54.262], [46.19, 54.936], [45.923, 55.61], [45.646, 56.284], [45.359, 56.959], [44.299, 57.234], [43.225, 57.501], [42.138, 57.758], [41.036, 58.007]]
@@ -346,7 +346,7 @@ select
   length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> list_transform(x, y-> round(y, 3)))) as closed
 from range(1, 30);
 ----
-96	97
+160	161
 80	81
 40	41
 20	21
@@ -383,7 +383,7 @@ select
   length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false), x -> list_transform(x, y-> round(y, 3)))) as b
 from range(1, 30);
 ----
-15	96
+25	160
 25	80
 25	40
 25	20
@@ -413,15 +413,55 @@ from range(1, 30);
 25	5
 25	5
 
+# a5_compact: a complete set of siblings is replaced by its parent. The result is a covering:
+# the compacted cells followed by a compaction marker recording the resolution (here 2).
 query I
 select a5_compact(a5_cell_to_children(360287970189639680::ubigint))
 ----
-[360287970189639680]
+[360287970189639680, 17294385519056126016]
+
+# The compaction marker is not a cell
+query III
+select a5_is_compaction_marker(17294385519056126016::ubigint),
+       a5_is_valid_cell(17294385519056126016::ubigint),
+       a5_is_compaction_marker(360287970189639680::ubigint)
+----
+true	false	false
 
 query I
-select a5_uncompact(a5_cell_to_children(360287970189639680::ubigint), 3);
+select a5_is_compaction_marker(NULL)
 ----
-[297237575406452736, 315251973915934720, 333266372425416704, 351280770934898688, 369295169444380672, 387309567953862656, 405323966463344640, 423338364972826624, 441352763482308608, 459367161991790592, 477381560501272576, 495395959010754560, 513410357520236544, 531424756029718528, 549439154539200512, 567453553048682496]
+NULL
+
+# a5_uncompact without a target resolution expands a covering back to the resolution of its marker
+query I
+select a5_uncompact(a5_compact(a5_cell_to_children(360287970189639680::ubigint)))
+     = a5_cell_to_children(360287970189639680::ubigint)
+----
+true
+
+# ... or to the resolution of the finest cell when there is no marker
+query I
+select a5_uncompact([360287970189639680::ubigint])
+----
+[360287970189639680]
+
+query II
+select a5_compact([]::ubigint[]), a5_uncompact([]::ubigint[])
+----
+[]	[]
+
+# a5_uncompact takes no target resolution: the set carries its own. To expand single cells to a
+# given resolution use a5_cell_to_children.
+statement error
+select a5_uncompact([a5_lonlat_to_cell(-122.4, 37.8, 10)], 12)
+----
+No function matches
+
+query I
+select len(flatten(list_transform(a5_cell_to_children(360287970189639680::ubigint), c -> a5_cell_to_children(c, 3))))
+----
+16
 
 # a5_hex_to_u64: Convert hex string to u64 cell ID
 query I
@@ -453,22 +493,34 @@ select a5_get_num_children(0, 1), a5_get_num_children(0, 2), a5_get_num_children
 ----
 5	20	1
 
-# a5_spherical_cap: Get cells within radius
+# a5_spherical_cap: Get cells within radius. The result is a covering (compacted cells, then a
+# compaction marker), so its length differs from the number of cells it stands for.
 query II
 select length(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 1000.0)), length(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 50000.0))
 ----
-1	145
+2	74
+
+query II
+select a5_count(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 1000.0)), a5_count(a5_spherical_cap(a5_lonlat_to_cell(-122.4, 37.8, 10), 50000.0))
+----
+1	244
 
 # a5_grid_disk: Get cells within k edge-steps
 query I
 select a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 0)
 ----
-[1937278465245970432]
+[1937278465245970432, 17296637318869811264]
 
 query III
 select length(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 0)), length(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)), length(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))
 ----
-1	6	11
+2	7	12
+
+# a5_grid_disk: number of cells in the disk, once uncompacted
+query III
+select a5_count(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 0)), a5_count(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)), len(a5_uncompact(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2)))
+----
+1	6	17
 
 # a5_grid_disk: negative k error
 statement error
@@ -480,7 +532,12 @@ a5_grid_disk: k must be >= 0
 query II
 select length(a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)), length(a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))
 ----
-8	14
+9	15
+
+query II
+select a5_count(a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)), a5_count(a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))
+----
+8	23
 
 # a5_grid_disk_vertex: negative k error
 statement error
@@ -493,6 +550,17 @@ query II
 select a5_world_cell(), a5_get_resolution(a5_world_cell())
 ----
 0	-1
+
+# a5_max_resolution: the finest resolution, which has cells and beyond which there are none
+query II
+select a5_max_resolution(), a5_get_resolution(a5_lonlat_to_cell(44, 55, a5_max_resolution()))
+----
+30	30
+
+statement error
+select a5_cell_area(a5_max_resolution() + 1)
+----
+a5_cell_area: Resolution must be between -1 and 30
 
 # a5_is_valid_cell: generated cells, the world cell, and all children of a valid cell are valid
 query IIII
@@ -521,32 +589,48 @@ select length(a5_geometry_to_cells('LINESTRING(0 0, 10 10, 20 5)'::GEOMETRY, 5))
 ----
 23
 
-# a5_geometry_to_cells: POLYGON is filled
+# a5_geometry_to_cells: POLYGON is filled. Polygon results are coverings, so the length
+# includes the trailing compaction marker.
 query I
 select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5))
 ----
-25
+26
 
 # a5_geometry_to_cells: overlapping=false matches the default (center) containment
 query I
 select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, false))
 ----
-25
+26
 
 # a5_geometry_to_cells: overlapping=true gives gap-free coverage, a superset of the default
 query I
 select length(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true))
 ----
-27
+30
+
+# a5_geometry_to_cells: a polygon covering ends in a compaction marker recording the resolution
+query II
+select a5_is_compaction_marker(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5)[-1]),
+       a5_covering_resolution(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5))
+----
+true	5
+
+# a5_geometry_to_cells: a polygon too small to hold a cell center gives an empty covering (just
+# the marker), an empty polygon gives nothing
+query II
+select a5_count(a5_geometry_to_cells('POLYGON((0 0, 0.0001 0, 0.0001 0.0001, 0 0))'::GEOMETRY, 5)),
+       a5_geometry_to_cells('POLYGON EMPTY'::GEOMETRY, 5)
+----
+0	[]
 
 # The default (center) containment cells are a subset of the overlapping cells. Both
 # sides are compacted, so uncompact to a uniform resolution before comparing (as with
 # the hole-subtraction test below).
 query I
 select len(list_intersect(
-  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5), 5),
-  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true), 5)))
-= len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5), 5))
+  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5)),
+  a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true))))
+= len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5)))
 ----
 true
 
@@ -560,8 +644,8 @@ a5_geometry_to_cells: Resolution must be between 0 and 30
 # A cell whose center lies in the hole must not appear in the result.
 query I
 select len(list_intersect(
-  a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9),
-  a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9)
+  a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9)),
+  a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9))
 ))
 ----
 0
@@ -569,11 +653,11 @@ select len(list_intersect(
 # a5_geometry_to_cells: hole subtraction is exact (with_hole = no_hole - hole, at uniform resolution)
 query I
 select
-  len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9))
-  = len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9), 9))
+  len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1),(2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9)))
+  = len(a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9)))
   - len(list_distinct(list_intersect(
-      a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9), 9),
-      a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9), 9))))
+      a5_uncompact(a5_geometry_to_cells('POLYGON((-1 -1, 11 -1, 11 11, -1 11, -1 -1))'::GEOMETRY, 9)),
+      a5_uncompact(a5_geometry_to_cells('POLYGON((2 2, 8 2, 8 8, 2 8, 2 2))'::GEOMETRY, 9)))))
 ----
 true
 
@@ -634,3 +718,208 @@ query I
 select len(a5_geometry_to_cells('MULTIPOLYGON(((0 0, 5 0, 5 5, 0 5, 0 0)),((20 20, 25 20, 25 25, 20 25, 20 20)))'::GEOMETRY, 6)) > 0
 ----
 true
+
+# a5_geometry_to_cells: MULTIPOLYGON is a single covering of both (disjoint) polygons
+query I
+select a5_count(a5_geometry_to_cells('MULTIPOLYGON(((0 0, 5 0, 5 5, 0 5, 0 0)),((20 20, 25 20, 25 25, 20 25, 20 20)))'::GEOMETRY, 6))
+     = a5_count(a5_geometry_to_cells('POLYGON((0 0, 5 0, 5 5, 0 5, 0 0))'::GEOMETRY, 6))
+     + a5_count(a5_geometry_to_cells('POLYGON((20 20, 25 20, 25 25, 20 25, 20 20))'::GEOMETRY, 6))
+----
+true
+
+# a5_geometry_to_cells: polygon parts mixed with other parts still give one covering - cells
+# in curve order with a single trailing marker - that includes the other parts' cells
+query III
+select list_count(list_filter(cells, x -> a5_is_compaction_marker(x))),
+       a5_is_compaction_marker(cells[-1]),
+       a5_contains(cells, a5_lonlat_to_cell(50, 50, 4))
+from (select a5_geometry_to_cells('GEOMETRYCOLLECTION(POINT(50 50), POLYGON((0 0, 5 0, 5 5, 0 5, 0 0)))'::GEOMETRY, 4) as cells)
+----
+1	true	true
+
+# a5_geometry_to_cells: geometries without polygon parts carry no compaction marker
+query I
+select list_count(list_filter(a5_geometry_to_cells('LINESTRING(0 0, 10 10, 20 5)'::GEOMETRY, 5), x -> a5_is_compaction_marker(x)))
+----
+0
+
+# a5_covering_resolution: resolution of the marker, else of the finest cell, else -1
+query III
+select a5_covering_resolution(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2)),
+       a5_covering_resolution([a5_lonlat_to_cell(44, 55, 3), a5_lonlat_to_cell(44, 55, 7)]),
+       a5_covering_resolution([]::ubigint[])
+----
+10	7	-1
+
+# a5_count / a5_area: measures of a set of cells
+query III
+select a5_count([a5_lonlat_to_cell(44, 55, 5)]),
+       a5_count(a5_compact(a5_cell_to_children(a5_lonlat_to_cell(44, 55, 5), 8))),
+       a5_count([]::ubigint[])
+----
+1	64	0
+
+query III
+select a5_area([a5_lonlat_to_cell(44, 55, 5)]) = a5_cell_area(5),
+       a5_area(a5_compact(a5_cell_to_children(a5_lonlat_to_cell(44, 55, 5), 8))) = a5_cell_area(5),
+       a5_area([]::ubigint[])
+----
+true	true	0.0
+
+query II
+select a5_count(NULL), a5_area(NULL)
+----
+NULL	NULL
+
+# a5_contains: is a cell in a set of cells
+query II
+select a5_contains(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_lonlat_to_cell(-122.4, 37.8, 10)),
+       a5_contains(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_lonlat_to_cell(44, 55, 10))
+----
+true	false
+
+# a5_contains: the cell must be at the resolution of the set
+statement error
+select a5_contains(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_lonlat_to_cell(-122.4, 37.8, 9))
+----
+a5_contains: Cannot test a cell at resolution 9 against cells at resolution 10
+
+# a5_overlaps: do two sets of cells share any cell
+query II
+select a5_overlaps(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 2)),
+       a5_overlaps(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_grid_disk(a5_lonlat_to_cell(44, 55, 10), 1))
+----
+true	false
+
+# a5_union / a5_intersect / a5_difference: the edge disk (6 cells) is a subset of the vertex disk (8 cells)
+query III
+select a5_count(a5_union(e, v)), a5_count(a5_intersect(e, v)), a5_count(a5_difference(v, e))
+from (select a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1) as e,
+             a5_grid_disk_vertex(a5_lonlat_to_cell(-122.4, 37.8, 10), 1) as v)
+----
+8	6	2
+
+# The set operations return coverings: an empty result is just the compaction marker
+query II
+select a5_difference(e, e) = [e[-1]], a5_union(e, e) = e
+from (select a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1) as e)
+----
+true	true
+
+# The set operations work row by row
+query I
+select a5_count(a5_intersect(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), k::integer), a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1)))
+from range(3) t(k)
+----
+1
+6
+6
+
+# The set operations need both sets at the same resolution
+statement error
+select a5_union(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 9), 1))
+----
+a5_union: Cannot combine cells at resolution 10 with cells at resolution 9
+
+query III
+select a5_union(NULL, [a5_lonlat_to_cell(44, 55, 5)]), a5_overlaps([a5_lonlat_to_cell(44, 55, 5)], NULL), a5_contains(NULL, a5_lonlat_to_cell(44, 55, 5))
+----
+NULL	NULL	NULL
+
+# a5_cell_to_supercell: the coarser cell containing the center of a cell
+query II
+select a5_cell_to_supercell(a5_lonlat_to_cell(-122.4, 37.8, 10), 5) = a5_lonlat_to_cell(-122.4, 37.8, 5),
+       a5_cell_to_supercell(a5_lonlat_to_cell(-122.4, 37.8, 10), 10) = a5_lonlat_to_cell(-122.4, 37.8, 10)
+----
+true	true
+
+statement error
+select a5_cell_to_supercell(a5_lonlat_to_cell(-122.4, 37.8, 5), 6)
+----
+a5_cell_to_supercell: Target resolution (6) must be equal to or less than current resolution (5)
+
+# a5_cell_to_subcell: the finer cells whose centers lie in a cell, as a covering
+query II
+select a5_count(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)),
+       a5_covering_resolution(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))
+----
+62	8
+
+# a5_cell_to_subcell is the inverse of a5_cell_to_supercell
+query I
+select bool_and(a5_cell_to_supercell(c, 5) = a5_lonlat_to_cell(-122.4, 37.8, 5))
+from (select unnest(a5_uncompact(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))) as c)
+----
+true
+
+statement error
+select a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 4)
+----
+a5_cell_to_subcell: Target resolution (4) must be equal to or greater than current resolution (5)
+
+statement error
+select a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 31)
+----
+a5_cell_to_subcell: Resolution must be between 0 and 30
+
+# a5_migrate: cell IDs created by a5 <= 0.10 map to the IDs of the same cells in the a5 1.0 index.
+# These are the IDs a5 0.10 gave a5_lonlat_to_cell(44, 55, resolution) at resolutions 2 to 29.
+query I
+select bool_and(a5_migrate(id) = a5_lonlat_to_cell(44, 55, a5_get_resolution(id)))
+from (select unnest([7241788200811757568, 7268809798575980544, 7271061598389665792, 7270498648436244480, 7270639385924599808, 7270604201552510976, 7270630589831577600, 7270689963459477504, 7270689413703663616, 7270689551142617088, 7270689516782878720, 7270689525372813312, 7270689514635395072, 7270689517319749632, 7270689517722402816, 7270689517554630656, 7270689517579796480, 7270689517586087936, 7270689517588709376, 7270689517589102592, 7270689517588938752, 7270689517588963328, 7270689517588985856, 7270689517588985344, 7270689517588987008, 7270689517588985376, 7270689517588985384, 7270689517588985382]::ubigint[]) as id)
+----
+true
+
+# a5_migrate: IDs at resolution 0 are unchanged
+query I
+select a5_migrate(c) = c from (select unnest(a5_get_res0_cells()) as c) limit 1
+----
+true
+
+# a5_migrate: a compaction marker is not a cell
+statement error
+select a5_migrate(17294385519056126016::ubigint)
+----
+a5_migrate: Invalid cell
+
+query I
+select a5_migrate(NULL)
+----
+NULL
+
+# a5_cell_to_parent: without a resolution, the parent one resolution coarser
+query II
+select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, 10)) = a5_cell_to_parent(a5_lonlat_to_cell(44, 55, 10), 9),
+       a5_cell_to_parent(a5_get_res0_cells()[1]) = a5_world_cell()
+----
+true	true
+
+# Resolution -1 is the world cell wherever a5 accepts a coarser resolution
+query IIII
+select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, 10), -1),
+       a5_cell_to_supercell(a5_lonlat_to_cell(44, 55, 10), -1),
+       a5_get_num_children(-1, 0),
+       a5_cell_area(-1) = 12 * a5_cell_area(0)
+----
+0	0	12	true
+
+statement error
+select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, 10), -2)
+----
+a5_cell_to_parent: Resolution must be between -1 and 30
+
+# The traversal functions have no answer for the world cell: an error, not a crash
+statement error
+select a5_grid_disk(a5_world_cell(), 1)
+----
+a5_grid_disk: a5 internal error
+
+statement error
+select a5_grid_disk_vertex(a5_world_cell(), 1)
+----
+a5_grid_disk_vertex: a5 internal error
+
+statement error
+select a5_spherical_cap(a5_world_cell(), 1000.0)
+----
+a5_spherical_cap: a5 internal error

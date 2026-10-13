@@ -49,7 +49,7 @@ SELECT a5_lonlat_to_cell(-74.0060, 40.7128, 15) as nyc_cell;  -- Times Square
 │      nyc_cell       │
 │       uint64        │
 ├─────────────────────┤
-│ 2742821848331845632 │
+│ 2760559170984869888 │
 └─────────────────────┘
 
 -- Find the area of that cell in square meters
@@ -63,12 +63,12 @@ SELECT a5_cell_area(15) as cell_area_m2;
 
 -- Get the center coordinates of a cell
 SELECT a5_cell_to_lonlat(a5_lonlat_to_cell(-74.0060, 40.7128, 15)) as center_coords;
-┌────────────────────────────────────────┐
-│             center_coords              │
-│               double[2]                │
-├────────────────────────────────────────┤
-│ [-74.00764805615836, 40.7128022513843] │
-└────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│              center_coords               │
+│                double[2]                 │
+├──────────────────────────────────────────┤
+│ [-74.00764805615836, 40.712802251384296] │
+└──────────────────────────────────────────┘
 
 -- Find parent cell at lower resolution
 SELECT a5_cell_to_parent(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 10) as parent_cell;
@@ -76,7 +76,7 @@ SELECT a5_cell_to_parent(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 10) as parent
 │     parent_cell     │
 │       uint64        │
 ├─────────────────────┤
-│ 2742821365684895744 │
+│ 2760558687264178176 │
 └─────────────────────┘
 
 -- Get all children cells at higher resolution
@@ -85,7 +85,7 @@ SELECT a5_cell_to_children(a5_lonlat_to_cell(-74.0060, 40.7128, 10), 11) as chil
 │                                     child_cells                                      │
 │                                       uint64[]                                       │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
-│ [2742820953368035328, 2742821228245942272, 2742821503123849216, 2742821778001756160] │
+│ [2760558274947317760, 2760558549825224704, 2760558824703131648, 2760559099581038592] │
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -124,9 +124,9 @@ This produces:
     "coordinates":[
         [
             [-3.63932161106527,40.445029005677384],
-            [-3.697330052435973,40.44427170464866],
-            [-3.745928891833728,40.424159040292594],
-            [-3.707910290384234,40.394201800420205],
+            [-3.697330052435973,40.44427170464865],
+            [-3.745928891833728,40.424159040292615],
+            [-3.707910290384234,40.39420180042019],
             [-3.6544386596323193,40.4080830654645],
             [-3.63932161106527,40.445029005677384]
         ]
@@ -142,9 +142,9 @@ Visualizing that A5 cell shows:
     "coordinates":[
         [
             [-3.63932161106527,40.445029005677384],
-            [-3.697330052435973,40.44427170464866],
-            [-3.745928891833728,40.424159040292594],
-            [-3.707910290384234,40.394201800420205],
+            [-3.697330052435973,40.44427170464865],
+            [-3.745928891833728,40.424159040292615],
+            [-3.707910290384234,40.39420180042019],
             [-3.6544386596323193,40.4080830654645],
             [-3.63932161106527,40.445029005677384]
         ]
@@ -167,13 +167,26 @@ Visualizing that A5 cell shows:
 | `a5_get_resolution(cell)` | `INTEGER` | Resolution of a cell |
 | `a5_get_num_cells(res)` | `UBIGINT` | Total cells at a resolution |
 | `a5_get_num_children(parent_res, child_res)` | `UBIGINT` | Children count between resolutions |
-| `a5_cell_to_parent(cell, res)` | `UBIGINT` | Parent at a coarser resolution |
+| `a5_cell_to_parent(cell [, res])` | `UBIGINT` | Parent at a coarser resolution |
 | `a5_cell_to_children(cell [, res])` | `UBIGINT[]` | Children at a finer resolution |
 | `a5_get_res0_cells()` | `UBIGINT[]` | The 12 base (resolution-0) cells |
 | `a5_world_cell()` | `UBIGINT` | The root world cell (`0`) |
+| `a5_max_resolution()` | `INTEGER` | The finest resolution (`30`) |
 | `a5_is_valid_cell(cell)` | `BOOLEAN` | Whether a value is a valid cell ID |
+| `a5_cell_to_supercell(cell, res)` | `UBIGINT` | Coarser cell containing the cell's center |
+| `a5_cell_to_subcell(cell, res)` | `UBIGINT[]` | Finer cells whose centers lie in the cell |
 | `a5_compact(cells)` | `UBIGINT[]` | Merge sibling cells into parents |
-| `a5_uncompact(cells, res)` | `UBIGINT[]` | Expand to a uniform resolution |
+| `a5_uncompact(cells)` | `UBIGINT[]` | Expand a set of cells to its resolution |
+| `a5_is_compaction_marker(value)` | `BOOLEAN` | Whether a value is a compaction marker |
+| `a5_covering_resolution(cells)` | `INTEGER` | Resolution of a set of cells |
+| `a5_count(cells)` | `UBIGINT` | Number of cells in a set at its resolution |
+| `a5_area(cells)` | `DOUBLE` | Area (m²) of a set of cells |
+| `a5_union(a, b)` | `UBIGINT[]` | Cells in either set |
+| `a5_intersect(a, b)` | `UBIGINT[]` | Cells in both sets |
+| `a5_difference(a, b)` | `UBIGINT[]` | Cells in `a` but not `b` |
+| `a5_overlaps(a, b)` | `BOOLEAN` | Whether two sets share any cell |
+| `a5_contains(cells, cell)` | `BOOLEAN` | Whether a cell is in a set |
+| `a5_migrate(cell)` | `UBIGINT` | Convert a pre-1.0 cell ID to the current index |
 | `a5_grid_disk(cell, k)` | `UBIGINT[]` | Cells within `k` edge-steps |
 | `a5_grid_disk_vertex(cell, k)` | `UBIGINT[]` | Cells within `k` vertex-steps |
 | `a5_spherical_cap(cell, radius)` | `UBIGINT[]` | Cells within a radius (meters) |
@@ -182,6 +195,9 @@ Visualizing that A5 cell shows:
 | `a5_cell_to_point(cell)` | `GEOMETRY` | Cell center as a `POINT` |
 | `a5_hex_to_u64(hex)` | `UBIGINT` | Parse a hex cell ID |
 | `a5_u64_to_hex(cell)` | `VARCHAR` | Cell ID as a hex string |
+
+> **Upgrading from an earlier version?** A5 1.0 changed cell IDs and the shape of some results — see
+> [Upgrading to A5 1.0](#-upgrading-to-a5-10).
 
 
 ### Core Functions
@@ -203,7 +219,7 @@ SELECT a5_lonlat_to_cell(-0.1278, 51.5074, 12) as london_cell;
 │     london_cell     │
 │       uint64        │
 ├─────────────────────┤
-│ 7161033366718906368 │
+│ 7176247309112442880 │
 └─────────────────────┘
 ```
 
@@ -245,35 +261,41 @@ Returns the resolution level of an A5 cell.
 
 **Example:**
 ```sql
-SELECT a5_get_resolution(207618739568) as resolution;
+SELECT a5_get_resolution(3074457264221469552) as resolution;
 ┌────────────┐
 │ resolution │
 │   int32    │
 ├────────────┤
-│     30     │
+│         30 │
 └────────────┘
 ```
 
 ### Spatial Relationships
 
-#### `a5_cell_to_parent(cell_id, target_resolution) -> UBIGINT`
+#### `a5_cell_to_parent(cell_id [, target_resolution]) -> UBIGINT`
 
-Returns the parent cell at a coarser resolution level.
+Returns the parent cell at a coarser resolution level, or the immediate parent (one resolution
+coarser) when `target_resolution` is omitted. A `target_resolution` of `-1` gives the world cell. The parent is the ancestor in the cell ID
+hierarchy; because A5 cells do not nest exactly across resolutions it need not contain the cell — see
+[`a5_cell_to_supercell`](#a5_cell_to_supercellcell_id-resolution---ubigint) for the coarser cell that
+does.
 
 **Example:**
 ```sql
-SELECT a5_cell_to_parent(207618739568, 10) as parent_cell;
+SELECT a5_cell_to_parent(3074457264221469552, 10) as parent_cell;
 ┌──────────────────────┐
 │     parent_cell      │
 │        uint64        │
 ├──────────────────────┤
-│ 11529215595824283648 │
+│ 11625292021370978304 │
 └──────────────────────┘
 ```
 
 #### `a5_cell_to_children(cell_id, target_resolution) -> UBIGINT[]`
 
-Returns all children cells at a finer resolution level.
+Returns all children cells at a finer resolution level. The children are the descendants in the cell
+ID hierarchy; see [`a5_cell_to_subcell`](#a5_cell_to_subcellcell_id-resolution---ubigint) for the
+finer cells that spatially lie in the cell.
 
 **Example:**
 ```sql
@@ -282,11 +304,47 @@ SELECT unnest(a5_cell_to_children(a5_lonlat_to_cell(2.2945, 48.8584, 10), 11)) a
 │     child_cells     │
 │       uint64        │
 ├─────────────────────┤
-│ 7188344376559403008 │
-│ 7188344651437309952 │
-│ 7188344926315216896 │
-│ 7188345201193123840 │
+│ 7195018412140003328 │
+│ 7195018687017910272 │
+│ 7195018961895817216 │
+│ 7195019236773724160 │
 └─────────────────────┘
+```
+
+#### `a5_cell_to_supercell(cell_id, resolution) -> UBIGINT`
+
+Returns the cell at a coarser resolution that **contains the center** of the given cell: the spatial
+counterpart of `a5_cell_to_parent`. Aggregating by supercell attributes each fine cell to the coarse
+cell it actually lies in, which the parent does not guarantee. A `resolution` of `-1` gives the world
+cell.
+
+**Example:**
+```sql
+SELECT a5_cell_to_parent(c, 5) as parent, a5_cell_to_supercell(c, 5) as supercell, a5_lonlat_to_cell(-74.0060, 40.7128, 5) as containing FROM (SELECT a5_lonlat_to_cell(-74.0060, 40.7128, 15) as c);
+┌─────────────────────┬─────────────────────┬─────────────────────┐
+│       parent        │      supercell      │     containing      │
+│       uint64        │       uint64        │       uint64        │
+├─────────────────────┼─────────────────────┼─────────────────────┤
+│ 2760143621624692736 │ 2761269521531535360 │ 2761269521531535360 │
+└─────────────────────┴─────────────────────┴─────────────────────┘
+```
+
+#### `a5_cell_to_subcell(cell_id, resolution) -> UBIGINT[]`
+
+Returns the cells at a finer resolution whose **centers lie in** the given cell: the spatial
+counterpart of `a5_cell_to_children` and the inverse of `a5_cell_to_supercell`. The subcells of all
+the cells at one resolution partition every finer resolution exactly. The result is a
+[covering](#coverings-and-compaction-markers).
+
+**Example:**
+```sql
+SELECT a5_count(a5_cell_to_subcell(a5_lonlat_to_cell(-74.0060, 40.7128, 5), 8)) as subcells, a5_count(a5_cell_to_children(a5_lonlat_to_cell(-74.0060, 40.7128, 5), 8)) as children;
+┌──────────┬──────────┐
+│ subcells │ children │
+│  uint64  │  uint64  │
+├──────────┼──────────┤
+│       62 │       64 │
+└──────────┴──────────┘
 ```
 
 ### Geometric Properties
@@ -297,13 +355,13 @@ Returns the center coordinates [longitude, latitude] of a cell.
 
 **Example:**
 ```sql
-SELECT a5_cell_to_lonlat(207618739568) as center;
-┌──────────────────────────────────────────┐
-│                  center                  │
-│                double[2]                 │
-├──────────────────────────────────────────┤
-│ [122.99924776996579, -52.73900617231107] │
-└──────────────────────────────────────────┘
+SELECT a5_cell_to_lonlat(3074457264221469552) as center;
+┌─────────────────────────────────────────┐
+│                 center                  │
+│                double[2]                │
+├─────────────────────────────────────────┤
+│ [122.99924776996579, -52.7390061723111] │
+└─────────────────────────────────────────┘
 ```
 
 #### `a5_cell_to_boundary(cell_id, [closed_ring, [segments]]) -> DOUBLE[2][]`
@@ -319,51 +377,51 @@ Returns the boundary vertices of a cell as an array of [longitude, latitude] pai
 **Examples:**
 
 ```sql
-SELECT unnest(a5_cell_to_boundary(207618739568)) as boundary_points;
-┌──────────────────────────────────────────┐
-│             boundary_points              │
-│                double[2]                 │
-├──────────────────────────────────────────┤
-│ [122.9992478383981, -52.739006156957515] │
-│ [122.9992477686406, -52.73900615209739]  │
-│ [122.99924770219661, -52.73900616591276] │
-│ [122.9992477354179, -52.73900619711099]  │
-│ [122.99924780517563, -52.73900618947682] │
-│ [122.9992478383981, -52.739006156957515] │
-└──────────────────────────────────────────┘
-```
-
-```sql
-SELECT unnest(a5_cell_to_boundary(207618739568, false, 5)) as boundary_points;
+SELECT unnest(a5_cell_to_boundary(3074457264221469552)) as boundary_points;
 ┌───────────────────────────────────────────┐
 │              boundary_points              │
 │                 double[2]                 │
 ├───────────────────────────────────────────┤
-│ [122.99924782444657, -52.73900615598544]  │
+│ [122.9992478383981, -52.73900615695749]   │
+│ [122.9992477686406, -52.73900615209739]   │
+│ [122.99924770219661, -52.739006165912784] │
+│ [122.9992477354179, -52.73900619711101]   │
+│ [122.99924780517563, -52.73900618947685]  │
+│ [122.9992478383981, -52.73900615695749]   │
+└───────────────────────────────────────────┘
+```
+
+```sql
+SELECT unnest(a5_cell_to_boundary(3074457264221469552, false, 5)) as boundary_points;
+┌───────────────────────────────────────────┐
+│              boundary_points              │
+│                 double[2]                 │
+├───────────────────────────────────────────┤
+│ [122.99924782444657, -52.73900615598549]  │
 │ [122.99924781049504, -52.73900615501345]  │
 │ [122.99924779654361, -52.73900615404143]  │
 │ [122.99924778259208, -52.73900615306941]  │
 │ [122.9992477686406, -52.73900615209739]   │
-│ [122.9992477553518, -52.739006154860455]  │
+│ [122.9992477553518, -52.739006154860476]  │
 │ [122.99924774206306, -52.73900615762355]  │
-│ [122.99924772877421, -52.73900616038661]  │
-│ [122.99924771548547, -52.739006163149696] │
-│ [122.99924770219661, -52.73900616591276]  │
+│ [122.99924772877421, -52.73900616038664]  │
+│ [122.99924771548547, -52.739006163149675] │
+│ [122.99924770219661, -52.739006165912784] │
 │ [122.99924770884093, -52.73900617215241]  │
-│ [122.99924771548513, -52.73900617839204]  │
+│ [122.99924771548513, -52.73900617839207]  │
 │ [122.99924772212938, -52.7390061846317]   │
 │ [122.99924772877364, -52.73900619087136]  │
-│ [122.9992477354179, -52.73900619711099]   │
-│ [122.99924774936949, -52.739006195584174] │
-│ [122.99924776332102, -52.73900619405734]  │
-│ [122.99924777727256, -52.739006192530496] │
+│ [122.9992477354179, -52.73900619711101]   │
+│ [122.99924774936943, -52.739006195584174] │
+│ [122.99924776332102, -52.73900619405736]  │
+│ [122.99924777727256, -52.739006192530525] │
 │ [122.9992477912241, -52.73900619100366]   │
-│ [122.99924780517563, -52.73900618947682]  │
-│ [122.99924781182006, -52.739006182972965] │
+│ [122.99924780517563, -52.73900618947685]  │
+│ [122.99924781182011, -52.739006182972965] │
 │ [122.9992478184646, -52.7390061764691]    │
-│ [122.99924782510902, -52.739006169965215] │
-│ [122.99924783175356, -52.739006163461376] │
-│ [122.9992478383981, -52.739006156957515]  │
+│ [122.99924782510908, -52.739006169965265] │
+│ [122.99924783175356, -52.73900616346135]  │
+│ [122.9992478383981, -52.73900615695749]   │
 ├───────────────────────────────────────────┤
 │                  25 rows                  │
 └───────────────────────────────────────────┘
@@ -383,7 +441,13 @@ built-in `GEOMETRY` type — no `spatial` extension is required (though it compo
   coverage instead — every cell that touches the polygon boundary is additionally included.
 - **`MULTIPOINT` / `MULTILINESTRING` / `MULTIPOLYGON` / `GEOMETRYCOLLECTION`** inputs are unioned.
 
-This is the single entry point for indexing geometries. (To go the other way — cell → geometry —
+A geometry with any polygon part is returned as a [covering](#coverings-and-compaction-markers):
+compacted cells sorted in curve order, followed by a compaction marker. Point- and line-only
+geometries are returned as plain cells at the requested resolution, in geometry order, with no marker.
+
+This is the single entry point for indexing geometries: it is the SQL counterpart of the A5
+library's `lonlat_to_cell`, `line_string_to_cells` and `polygon_to_cells`, chosen by geometry type.
+(To go the other way — cell → geometry —
 see [`a5_cell_to_geometry`](#a5_cell_to_geometrycell_id-segments---geometry).)
 
 **Parameters:**
@@ -394,10 +458,11 @@ see [`a5_cell_to_geometry`](#a5_cell_to_geometrycell_id-segments---geometry).)
   coverage) instead of only cells whose center lies inside. Defaults to `false`.
 
 > **Note:** Polygon coverings are returned **compacted** — cells may be at coarser resolutions where
-> a parent is fully contained. Use
-> [`a5_uncompact`](#a5_uncompactcell_ids-target_resolution---ubigint) to expand to a uniform
-> resolution. Also note that with the default center containment, features smaller than a cell (no
-> cell center inside) yield no cells — use `overlapping := true` if you need those covered instead.
+> a parent is fully contained — and end in a compaction marker, which is not a cell. Use
+> [`a5_uncompact`](#a5_uncompactcell_ids---ubigint) to expand to the cells at a
+> uniform resolution. Also note that with the default center containment, features smaller than a cell
+> (no cell center inside) yield an empty covering (just the marker) — use `overlapping := true` if you
+> need those covered instead.
 
 **Examples:**
 ```sql
@@ -410,10 +475,10 @@ SELECT a5_geometry_to_cells('POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, 
 SELECT a5_geometry_to_cells('MULTIPOINT((-74.0 40.7), (-73.9 40.8))'::GEOMETRY, 8) as cells;
 
 -- Expand a polygon covering to a uniform resolution
-SELECT a5_uncompact(a5_geometry_to_cells(g, 10), 10) FROM (SELECT 'POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY AS g);
+SELECT a5_uncompact(a5_geometry_to_cells(g, 10)) FROM (SELECT 'POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY AS g);
 
 -- Gap-free coverage: every cell touching the polygon, not just cells whose center is inside
-SELECT len(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true)) as overlapping_cells;
+SELECT a5_count(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 5, true)) as overlapping_cells;
 ```
 
 **Polygon holes:** Interior rings are excluded from the covering — the a5 crate removes them
@@ -421,8 +486,8 @@ directly. At a uniform resolution this simply drops the cells the hole contains:
 
 ```sql
 SELECT
-    len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 6), 6)) AS solid_cells,
-    len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0), (3 3, 7 3, 7 7, 3 7, 3 3))'::GEOMETRY, 6), 6)) AS with_hole_cells;
+    len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0))'::GEOMETRY, 6))) AS solid_cells,
+    len(a5_uncompact(a5_geometry_to_cells('POLYGON((0 0, 10 0, 10 10, 0 10, 0 0), (3 3, 7 3, 7 7, 3 7, 3 3))'::GEOMETRY, 6))) AS with_hole_cells;
 ┌─────────────┬─────────────────┐
 │ solid_cells │ with_hole_cells │
 │    int64    │      int64      │
@@ -465,7 +530,9 @@ SELECT ST_AsText(a5_cell_to_point(a5_lonlat_to_cell(-74.0060, 40.7128, 10))) as 
 
 #### `a5_grid_disk(cell_id, k) -> UBIGINT[]`
 
-Returns all A5 cells within `k` edge-steps of the given cell (edge adjacency).
+Returns all A5 cells within `k` edge-steps of the given cell (edge adjacency), including the cell
+itself. The result is a [covering](#coverings-and-compaction-markers): compacted cells followed by a
+compaction marker — use `a5_uncompact` to get one row per neighbor.
 
 **Parameters:**
 
@@ -475,11 +542,30 @@ Returns all A5 cells within `k` edge-steps of the given cell (edge adjacency).
 **Example:**
 ```sql
 SELECT a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1) as neighbors;
+┌───────────────────────────────────────────────────────────────────────────────────────┐
+│                                       neighbors                                       │
+│                                       uint64[]                                        │
+├───────────────────────────────────────────────────────────────────────────────────────┤
+│ [2760557102958116864, 2760559170447998976, 2760559181722288128, 17298044693753364544] │
+└───────────────────────────────────────────────────────────────────────────────────────┘
+
+SELECT unnest(a5_uncompact(a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1))) as neighbor;
+┌─────────────────────┐
+│      neighbor       │
+│       uint64        │
+├─────────────────────┤
+│ 2760557102958116864 │
+│ 2760559168837386240 │
+│ 2760559169911128064 │
+│ 2760559170984869888 │
+│ 2760559172058611712 │
+│ 2760559181722288128 │
+└─────────────────────┘
 ```
 
 #### `a5_grid_disk_vertex(cell_id, k) -> UBIGINT[]`
 
-Returns all A5 cells within `k` vertex-steps of the given cell (vertex adjacency). This returns more cells than `a5_grid_disk` at the same `k` because vertex adjacency includes cells that share only a vertex.
+Returns all A5 cells within `k` vertex-steps of the given cell (vertex adjacency). This returns more cells than `a5_grid_disk` at the same `k` because vertex adjacency includes cells that share only a vertex. The result is a [covering](#coverings-and-compaction-markers).
 
 **Parameters:**
 
@@ -493,7 +579,8 @@ SELECT a5_grid_disk_vertex(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1) as neigh
 
 #### `a5_spherical_cap(cell_id, radius) -> UBIGINT[]`
 
-Returns all A5 cells within the specified radius (in meters) of the given cell.
+Returns all A5 cells whose centers lie within the specified radius (in meters) of the given cell. The
+result is a [covering](#coverings-and-compaction-markers).
 
 **Parameters:**
 
@@ -503,6 +590,15 @@ Returns all A5 cells within the specified radius (in meters) of the given cell.
 **Example:**
 ```sql
 SELECT a5_spherical_cap(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 5000.0) as nearby_cells;
+
+-- The compacted list is much shorter than the cells it stands for
+SELECT len(cap) as list_length, a5_count(cap) as cells, a5_area(cap) / 1e6 as area_km2 FROM (SELECT a5_spherical_cap(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 5000.0) as cap);
+┌─────────────┬────────┬───────────────────┐
+│ list_length │ cells  │     area_km2      │
+│    int64    │ uint64 │      double       │
+├─────────────┼────────┼───────────────────┤
+│         249 │   2480 │ 78.53922430755013 │
+└─────────────┴────────┴───────────────────┘
 ```
 
 ### Utility Functions
@@ -565,16 +661,32 @@ SELECT a5_world_cell() as world_cell;
 └────────────┘
 ```
 
+#### `a5_max_resolution() -> INTEGER`
+
+Returns the finest A5 resolution level. Resolutions run from `0` to this value.
+
+**Example:**
+```sql
+SELECT a5_max_resolution() as max_resolution;
+┌────────────────┐
+│ max_resolution │
+│     int32      │
+├────────────────┤
+│             30 │
+└────────────────┘
+```
+
 #### `a5_is_valid_cell(cell_id) -> BOOLEAN`
 
 Returns `true` if the value is a valid A5 cell — i.e. a canonically-encoded cell ID. Useful for
 guarding against malformed identifiers (e.g. values from another indexing system, or a `BIGINT`
 column that lost its encoding). The world cell (`0`) is considered valid.
 
-The check decodes the ID and verifies it re-encodes to the same value, so it rejects out-of-range
-origins and non-canonical bit patterns. Note that A5's encoding is dense: most in-range 64-bit
-values decode to a genuine cell, so this is a structural well-formedness check, not a guarantee that
-a given number was intentionally produced.
+The check rejects out-of-range origins and non-canonical bit patterns, including
+[compaction markers](#coverings-and-compaction-markers). Note that A5's encoding is dense: most
+in-range 64-bit values are a genuine cell, so this is a structural well-formedness check, not a
+guarantee that a given number was intentionally produced. In particular it cannot tell a cell ID
+created before A5 1.0 from a current one — see [`a5_migrate`](#a5_migratecell_id---ubigint).
 
 **Example:**
 ```sql
@@ -633,28 +745,50 @@ SELECT a5_get_num_children(0, 1) as num_children;
 └──────────────┘
 ```
 
+### Coverings and Compaction Markers
+
+A **covering** is how A5 represents a region as a list of cells: the cells are **compacted** (every
+complete group of siblings is replaced by its parent, recursively), sorted in curve order, and
+followed by one **compaction marker** — a `UBIGINT` that is *not* a cell and records the resolution
+the cells stand for. Without it a compacted list could not be expanded again: a region that
+compacts to a single resolution-5 cell would look the same whether it was built at resolution 6
+or 12.
+
+`a5_compact`, `a5_grid_disk`, `a5_grid_disk_vertex`, `a5_spherical_cap`, `a5_cell_to_subcell`,
+`a5_union`, `a5_intersect`, `a5_difference` and polygon results of `a5_geometry_to_cells` all return
+coverings. Every function taking a list of cells accepts a covering, and also a plain list of cells
+without a marker, whose resolution is then that of its finest cell.
+
+Because the marker is not a cell, expand a covering before treating its elements as cells
+(`unnest(a5_uncompact(cells))`), or drop the marker with
+`list_filter(cells, x -> NOT a5_is_compaction_marker(x))` if you want the compacted cells themselves.
+
 #### `a5_compact(cell_ids) -> UBIGINT[]`
 
 Compacts a set of A5 cells by replacing complete groups of sibling cells with their parent cells.
+The result is a covering: the compacted cells, then a compaction marker recording the resolution of
+the finest input cell.
 
 **Example:**
 ```sql
 SELECT a5_compact([324259173170675712, 396316767208603648, 468374361246531584, 540431955284459520]::ubigint[]) as result;
-┌──────────────────────┐
-│        result        │
-│       uint64[]       │
-├──────────────────────┤
-│ [360287970189639680] │
-└──────────────────────┘
+┌────────────────────────────────────────────┐
+│                   result                   │
+│                  uint64[]                  │
+├────────────────────────────────────────────┤
+│ [360287970189639680, 17294385519056126016] │
+└────────────────────────────────────────────┘
 ```
 
-#### `a5_uncompact(cell_ids, target_resolution) -> UBIGINT[]`
+#### `a5_uncompact(cell_ids) -> UBIGINT[]`
 
-Expands a set of A5 cells to a target resolution by generating all descendant cells.
+Expands a set of A5 cells to all their cells at the resolution of the set — its compaction marker,
+or its finest cell when it has none — so `a5_uncompact(a5_compact(cells))` gives back `cells`
+(sorted). The result never contains a marker.
 
 **Example:**
 ```sql
-SELECT a5_uncompact([324259173170675712, 396316767208603648, 468374361246531584, 540431955284459520]::ubigint[], 2) as result;
+SELECT a5_uncompact([360287970189639680, 17294385519056126016]::ubigint[]) as result;
 ┌──────────────────────────────────────────────────────────────────────────────────┐
 │                                      result                                      │
 │                                     uint64[]                                     │
@@ -662,6 +796,175 @@ SELECT a5_uncompact([324259173170675712, 396316767208603648, 468374361246531584,
 │ [324259173170675712, 396316767208603648, 468374361246531584, 540431955284459520] │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+To expand a single cell to a chosen resolution, use
+[`a5_cell_to_children(cell, resolution)`](#a5_cell_to_childrencell_id-target_resolution---ubigint).
+
+#### `a5_is_compaction_marker(value) -> BOOLEAN`
+
+Returns `true` if the value is a compaction marker rather than a cell.
+
+**Example:**
+```sql
+SELECT a5_is_compaction_marker(c) as is_marker, c FROM (SELECT unnest(a5_compact([324259173170675712, 396316767208603648, 468374361246531584, 540431955284459520]::ubigint[])) as c);
+┌───────────┬──────────────────────┐
+│ is_marker │          c           │
+│  boolean  │        uint64        │
+├───────────┼──────────────────────┤
+│ false     │   360287970189639680 │
+│ true      │ 17294385519056126016 │
+└───────────┴──────────────────────┘
+```
+
+#### `a5_covering_resolution(cell_ids) -> INTEGER`
+
+Returns the resolution of a set of cells: the resolution of its compaction marker, or of its finest
+cell when it has none. Returns `-1` for an empty list.
+
+**Example:**
+```sql
+SELECT a5_covering_resolution(a5_spherical_cap(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 5000.0)) as resolution;
+┌────────────┐
+│ resolution │
+│   int32    │
+├────────────┤
+│         15 │
+└────────────┘
+```
+
+#### `a5_count(cell_ids) -> UBIGINT` and `a5_area(cell_ids) -> DOUBLE`
+
+`a5_count` returns the number of cells in a set at its resolution — the length of the uncompacted
+list, without building it. `a5_area` returns the total area of the set in square meters, which is
+exact because A5 cells are equal-area. If the list holds overlapping cells (say, a cell and one of
+its children) each is counted, so merge such lists with `a5_union` first.
+
+**Example:**
+```sql
+SELECT len(cap) as list_length, a5_count(cap) as cells, a5_area(cap) / 1e6 as area_km2 FROM (SELECT a5_spherical_cap(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 5000.0) as cap);
+┌─────────────┬────────┬───────────────────┐
+│ list_length │ cells  │     area_km2      │
+│    int64    │ uint64 │      double       │
+├─────────────┼────────┼───────────────────┤
+│         249 │   2480 │ 78.53922430755013 │
+└─────────────┴────────┴───────────────────┘
+```
+
+### Set Operations
+
+These operate directly on compacted cells — nothing is uncompacted — so they stay fast for large
+regions. Both arguments must be at the **same resolution** (A5 resolutions do not nest
+geometrically, so combining sets at different resolutions has no meaning); an error is raised
+otherwise.
+
+#### `a5_union(a, b)`, `a5_intersect(a, b)`, `a5_difference(a, b) -> UBIGINT[]`
+
+Return the cells in either set, in both sets, and in `a` but not `b`, as a covering.
+
+**Example:**
+```sql
+SELECT a5_count(a5_union(a, b)) as in_either, a5_count(a5_intersect(a, b)) as in_both, a5_count(a5_difference(a, b)) as only_in_a FROM (SELECT a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 12), 2) as a, a5_spherical_cap(a5_lonlat_to_cell(-73.99, 40.73, 12), 2000.0) as b);
+┌───────────┬─────────┬───────────┐
+│ in_either │ in_both │ only_in_a │
+│  uint64   │ uint64  │  uint64   │
+├───────────┼─────────┼───────────┤
+│        18 │       6 │        11 │
+└───────────┴─────────┴───────────┘
+```
+
+#### `a5_overlaps(a, b) -> BOOLEAN`
+
+Returns `true` if the two sets share any cell.
+
+**Example:**
+```sql
+SELECT a5_overlaps(a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 12), 2), a5_spherical_cap(a5_lonlat_to_cell(-73.99, 40.73, 12), 2000.0)) as overlaps;
+┌──────────┐
+│ overlaps │
+│ boolean  │
+├──────────┤
+│ true     │
+└──────────┘
+```
+
+#### `a5_contains(cell_ids, cell_id) -> BOOLEAN`
+
+Returns `true` if the cell is in the set. The cell must be at the resolution of the set, so for a
+point-in-region test index the point at that resolution. The set must be sorted in curve order, as
+coverings are.
+
+**Example:**
+```sql
+SELECT a5_contains(a5_geometry_to_cells('POLYGON((-74.02 40.70, -73.95 40.70, -73.95 40.78, -74.02 40.78, -74.02 40.70))'::GEOMETRY, 12), a5_lonlat_to_cell(-74.0060, 40.7128, 12)) as inside;
+┌─────────┐
+│ inside  │
+│ boolean │
+├─────────┤
+│ true    │
+└─────────┘
+```
+
+### Migration
+
+#### `a5_migrate(cell_id) -> UBIGINT`
+
+Converts a cell ID created before A5 1.0 to the ID of the same cell in the current index. See
+[Upgrading to A5 1.0](#-upgrading-to-a5-10).
+
+**Example:**
+```sql
+-- 2742821848331845632 is what a5_lonlat_to_cell(-74.0060, 40.7128, 15) returned before A5 1.0
+SELECT a5_migrate(2742821848331845632) as migrated, a5_lonlat_to_cell(-74.0060, 40.7128, 15) as current;
+┌─────────────────────┬─────────────────────┐
+│      migrated       │       current       │
+│       uint64        │       uint64        │
+├─────────────────────┼─────────────────────┤
+│ 2760559170984869888 │ 2760559170984869888 │
+└─────────────────────┴─────────────────────┘
+```
+
+## ⬆️ Upgrading to A5 1.0
+
+This version of the extension is built on A5 1.0, which changes results in ways that matter if you
+have stored cell IDs or query code written against an earlier version:
+
+- **Cell IDs changed.** A5 1.0 orders cells along a new curve, so the same cell has a different ID
+  at resolutions 2 and finer. IDs stored by an earlier version are still well-formed — they silently
+  refer to *different* cells — so migrate them once with `a5_migrate`:
+  ```sql
+  UPDATE my_table SET cell_id = a5_migrate(cell_id);
+  ```
+  `a5_migrate` must be applied exactly once, and only to pre-1.0 IDs; there is no way to tell from an
+  ID which index it belongs to.
+- **Resolution-1 cells were redefined.** Resolution-1 IDs are left unchanged by `a5_migrate`, but
+  the cells they name have a different shape than before, so a point may now fall in a different
+  resolution-1 cell. Re-index resolution-1 data from its source coordinates.
+- **Coverings end in a compaction marker.** `a5_compact`, `a5_grid_disk`, `a5_grid_disk_vertex`,
+  `a5_spherical_cap` and polygon results of `a5_geometry_to_cells` now return one extra element that
+  is not a cell — see [Coverings and Compaction Markers](#coverings-and-compaction-markers). Code
+  that unnests these lists or takes their `len()` should go through `a5_uncompact` / `a5_count`.
+- **`a5_uncompact` no longer takes a resolution.** `a5_uncompact(cells, resolution)` is gone; a
+  covering now carries its own resolution, so write `a5_uncompact(cells)`. For results of
+  `a5_geometry_to_cells`, `a5_grid_disk`, `a5_spherical_cap` and `a5_compact` this is a drop-in
+  change. To expand a hand-built list of cells to a chosen resolution, expand each cell instead:
+  ```sql
+  SELECT flatten(list_transform(cells, c -> a5_cell_to_children(c, 12)));
+  ```
+- **`a5_get_num_cells` is exact** at resolutions 28-30, where it previously returned rounded values.
+- **Resolution `-1` is accepted** as the world cell by `a5_cell_to_parent`, `a5_cell_to_supercell`,
+  `a5_get_num_children` and `a5_cell_area`, which previously raised an error, and
+  `a5_cell_to_parent(cell)` without a resolution returns the immediate parent.
+
+A quick checklist for existing queries:
+
+| If you have… | Change it to… |
+|---|---|
+| stored cell IDs (resolution 2+) | `a5_migrate(cell_id)`, once |
+| stored resolution-1 cell IDs | re-index from source coordinates |
+| `a5_uncompact(x, res)` | `a5_uncompact(x)` |
+| `unnest(a5_grid_disk(...))` and other coverings | `unnest(a5_uncompact(a5_grid_disk(...)))` |
+| `len(...)` of a covering | `a5_count(...)` |
+| `list_contains(covering, cell)` | `a5_contains(covering, cell)` |
 
 ## 🎯 Resolution Guide
 
