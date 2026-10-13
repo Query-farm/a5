@@ -74,6 +74,12 @@ The Rust FFI bindings are in `a5_rust/src/lib.rs`. Key patterns:
 - `TernaryExecutor`: Three input parameters (e.g., `a5_lonlat_to_cell`)
 - Manual loops for array outputs (e.g., `a5_cell_to_boundary`, `a5_cell_to_children`)
 
+DuckDB 2.0 specifics (this branch targets `v2.0-cyanoptera`):
+- The vector helpers live in their own headers (`duckdb/common/vector/{flat,list,array,string}_vector.hpp`); use `ListVector::GetChild` / `GetChildMutable` and `FlatVector::GetData` (const) / `GetDataMutable`.
+- Executors and `ToUnifiedFormat` no longer take a row count; `Vector::Reference(value, count_t(n))` does.
+- A scalar function that can throw **must** be registered with `SetFallible()` (on the function or the function set), otherwise DuckDB raises an internal error when it throws. Only functions that can never throw are left unmarked.
+- Arrow lambdas (`x -> ...`) are gone; tests, examples and docs use `lambda x: ...`.
+
 All functions validate that resolution parameters are ≤30 (MAX_RESOLUTION constant). Where the crate accepts `-1` (the world cell) as a coarser resolution — `a5_cell_to_parent`, `a5_cell_to_supercell`, `a5_get_num_children`, `a5_cell_area` — so does the SQL function (`ValidateResolutionOrWorld`).
 
 ### GEOMETRY Integration

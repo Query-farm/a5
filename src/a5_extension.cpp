@@ -6,12 +6,17 @@
 #include "duckdb/function/scalar_function.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 #include "duckdb/common/types/geometry.hpp"
+#include "duckdb/common/vector/array_vector.hpp"
+#include "duckdb/common/vector/flat_vector.hpp"
+#include "duckdb/common/vector/list_vector.hpp"
+#include "duckdb/common/vector/string_vector.hpp"
+#include "duckdb/common/vector/unified_vector_format.hpp"
 #include "rust.h"
 #include "query_farm_telemetry.hpp"
 #include <unordered_set>
 namespace duckdb {
 
-#define A5_EXTENSION_VERSION "2026101304"
+#define A5_EXTENSION_VERSION "2026101305"
 
 // The finest A5 resolution, as defined by the a5 crate.
 static const int32_t MAX_RESOLUTION = a5_max_resolution();
@@ -62,7 +67,7 @@ inline void ThrowLonLatArrayError(LonLatDegreesArray &arr, const char *function_
 
 inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
-	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
+	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, [&](int32_t resolution) {
 		ValidateResolutionOrWorld(resolution, "a5_cell_area");
 		return a5_cell_area(resolution);
 	});
@@ -70,7 +75,7 @@ inline void A5CellAreaFun(DataChunk &args, ExpressionState &state, Vector &resul
 
 inline void A5CellEdgeLengthAvgFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
-	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, args.size(), [&](int32_t resolution) {
+	UnaryExecutor::Execute<int32_t, double>(resolution_vector, result, [&](int32_t resolution) {
 		ValidateResolution(resolution, "a5_cell_edge_length_avg");
 		return a5_cell_edge_length_avg(resolution);
 	});
@@ -78,7 +83,7 @@ inline void A5CellEdgeLengthAvgFun(DataChunk &args, ExpressionState &state, Vect
 
 inline void A5GetNumCellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &resolution_vector = args.data[0];
-	UnaryExecutor::Execute<int32_t, uint64_t>(resolution_vector, result, args.size(), [&](int32_t resolution) {
+	UnaryExecutor::Execute<int32_t, uint64_t>(resolution_vector, result, [&](int32_t resolution) {
 		ValidateResolution(resolution, "a5_get_num_cells");
 		return a5_get_num_cells(resolution);
 	});
@@ -86,7 +91,7 @@ inline void A5GetNumCellsFun(DataChunk &args, ExpressionState &state, Vector &re
 
 inline void A5GetResolutionFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
-	UnaryExecutor::Execute<uint64_t, int32_t>(cell_vector, result, args.size(),
+	UnaryExecutor::Execute<uint64_t, int32_t>(cell_vector, result,
 	                                          [&](uint64_t cell) { return a5_get_resolution(cell); });
 }
 
@@ -96,8 +101,7 @@ inline void A5LonLatToCellFun(DataChunk &args, ExpressionState &state, Vector &r
 	auto &resolution_vector = args.data[2];
 
 	TernaryExecutor::Execute<double, double, int32_t, uint64_t>(
-	    lon_vector, lat_vector, resolution_vector, result, args.size(),
-	    [&](double lon, double lat, int32_t resolution) {
+	    lon_vector, lat_vector, resolution_vector, result, [&](double lon, double lat, int32_t resolution) {
 		    ValidateResolution(resolution, "a5_lonlat_to_cell");
 		    struct ResultU64 res = a5_lon_lat_to_cell(lon, lat, resolution);
 		    ThrowRustError(res.error, "a5_lonlat_to_cell");
@@ -109,7 +113,7 @@ inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &r
 	auto &cell_vector = args.data[0];
 
 	if (args.ColumnCount() == 1) {
-		UnaryExecutor::Execute<uint64_t, uint64_t>(cell_vector, result, args.size(), [&](uint64_t cell) {
+		UnaryExecutor::Execute<uint64_t, uint64_t>(cell_vector, result, [&](uint64_t cell) {
 			struct ResultU64 res = a5_cell_to_immediate_parent(cell);
 			ThrowRustError(res.error, "a5_cell_to_parent");
 			return res.value;
@@ -120,7 +124,7 @@ inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &r
 	auto &parent_resolution_vector = args.data[1];
 
 	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
-	    cell_vector, parent_resolution_vector, result, args.size(), [&](uint64_t cell, int32_t parent_resolution) {
+	    cell_vector, parent_resolution_vector, result, [&](uint64_t cell, int32_t parent_resolution) {
 		    ValidateResolutionOrWorld(parent_resolution, "a5_cell_to_parent");
 		    struct ResultU64 res = a5_cell_to_parent(cell, parent_resolution);
 		    ThrowRustError(res.error, "a5_cell_to_parent");
@@ -131,14 +135,14 @@ inline void A5CellToParentFun(DataChunk &args, ExpressionState &state, Vector &r
 inline void A5CellToLonLatFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &cell_vector = args.data[0];
 
-	auto &result_data_children = ArrayVector::GetEntry(result);
-	double *data_ptr = FlatVector::GetData<double>(result_data_children);
+	auto &result_data_children = ArrayVector::GetChildMutable(result);
+	double *data_ptr = FlatVector::GetDataMutable<double>(result_data_children);
 
 	// Standardize the vectors to a unified format, so it can be iterated.
 	UnifiedVectorFormat cell_id_format;
-	cell_vector.ToUnifiedFormat(args.size(), cell_id_format);
+	cell_vector.ToUnifiedFormat(cell_id_format);
 
-	uint64_t *input_data_ptr = FlatVector::GetData<uint64_t>(cell_vector);
+	auto input_data_ptr = UnifiedVectorFormat::GetData<uint64_t>(cell_id_format);
 
 	for (idx_t i = 0; i < args.size(); i++) {
 		auto cell_idx = cell_id_format.sel->get_index(i);
@@ -171,19 +175,19 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 		auto &max_resolution_vector = args.data[1];
 
 		BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
-		    cell_vector, max_resolution_vector, result, args.size(), [&](uint64_t cell_id, int32_t child_resolution) {
+		    cell_vector, max_resolution_vector, result, [&](uint64_t cell_id, int32_t child_resolution) {
 			    ValidateResolution(child_resolution, "a5_cell_to_children");
 			    auto child_result = a5_cell_to_children(cell_id, child_resolution);
 			    ThrowCellArrayError(child_result, "a5_cell_to_children");
 
 			    if (child_result.len == 0) {
 				    a5_free_cell_array(child_result);
-				    return list_entry_t {0, 0};
+				    return list_entry_t(0, 0);
 			    }
 			    for (size_t i = 0; i < child_result.len; i++) {
 				    ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
 			    }
-			    list_entry_t out {offset, child_result.len};
+			    list_entry_t out(offset, child_result.len);
 			    offset += child_result.len;
 			    a5_free_cell_array(child_result);
 			    return out;
@@ -191,18 +195,18 @@ inline void A5CellToChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 	} else if (args.ColumnCount() == 1) {
 		auto &cell_vector = args.data[0];
 
-		UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, args.size(), [&](uint64_t cell_id) {
+		UnaryExecutor::Execute<uint64_t, list_entry_t>(cell_vector, result, [&](uint64_t cell_id) {
 			auto child_result = a5_cell_to_children(cell_id, -1);
 			ThrowCellArrayError(child_result, "a5_cell_to_children");
 
 			if (child_result.len == 0) {
 				a5_free_cell_array(child_result);
-				return list_entry_t {0, 0};
+				return list_entry_t(0, 0);
 			}
 			for (size_t i = 0; i < child_result.len; i++) {
 				ListVector::PushBack(result, Value::UBIGINT(child_result.data[i]));
 			}
-			list_entry_t out {offset, child_result.len};
+			list_entry_t out(offset, child_result.len);
 			offset += child_result.len;
 			a5_free_cell_array(child_result);
 			return out;
@@ -221,7 +225,7 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 	auto compute_boundary = [&](uint64_t cell_id, bool closed_ring, int32_t segments) -> list_entry_t {
 		if (cell_id == 0) {
 			// A5 defines cell 0 as invalid / non-existent, so return an empty boundary
-			return {0, 0};
+			return list_entry_t(0, 0);
 		}
 
 		CellBoundaryOptions options;
@@ -232,7 +236,7 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 		ThrowLonLatArrayError(boundary_result, "a5_cell_to_boundary");
 		if (boundary_result.len == 0) {
 			a5_free_lonlatdegrees_array(boundary_result);
-			return {0, 0};
+			return list_entry_t(0, 0);
 		}
 
 		for (size_t i = 0; i < boundary_result.len; i++) {
@@ -241,7 +245,7 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 			    result, Value::ARRAY(LogicalType::DOUBLE, {Value::DOUBLE(coord.lon), Value::DOUBLE(coord.lat)}));
 		}
 
-		list_entry_t out {offset, boundary_result.len};
+		list_entry_t out(offset, boundary_result.len);
 		offset += boundary_result.len;
 		a5_free_lonlatdegrees_array(boundary_result);
 		return out;
@@ -249,17 +253,17 @@ inline void A5CellToBoundaryFun(DataChunk &args, ExpressionState &state, Vector 
 
 	if (args.ColumnCount() == 1) {
 		UnaryExecutor::Execute<uint64_t, list_entry_t>(
-		    cell_vector, result, args.size(), [&](uint64_t cell_id) { return compute_boundary(cell_id, true, -1); });
+		    cell_vector, result, [&](uint64_t cell_id) { return compute_boundary(cell_id, true, -1); });
 	} else if (args.ColumnCount() == 2) {
 		auto &closed_ring_vector = args.data[1];
 		BinaryExecutor::Execute<uint64_t, bool, list_entry_t>(
-		    cell_vector, closed_ring_vector, result, args.size(),
+		    cell_vector, closed_ring_vector, result,
 		    [&](uint64_t cell_id, bool closed_ring) { return compute_boundary(cell_id, closed_ring, -1); });
 	} else if (args.ColumnCount() == 3) {
 		auto &closed_ring_vector = args.data[1];
 		auto &segments_vector = args.data[2];
 		TernaryExecutor::Execute<uint64_t, bool, int32_t, list_entry_t>(
-		    cell_vector, closed_ring_vector, segments_vector, result, args.size(),
+		    cell_vector, closed_ring_vector, segments_vector, result,
 		    [&](uint64_t cell_id, bool closed_ring, int32_t segments) {
 			    if (segments <= 0) {
 				    segments = -1;
@@ -281,7 +285,7 @@ inline void A5GetRes0CellsFun(DataChunk &args, ExpressionState &state, Vector &r
 	Value val = Value::LIST(LogicalType::UBIGINT, cell_vec);
 
 	D_ASSERT(args.ColumnCount() == 0);
-	result.Reference(val);
+	result.Reference(val, count_t(args.size()));
 }
 
 inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -291,30 +295,29 @@ inline void A5CompactFun(DataChunk &args, ExpressionState &state, Vector &result
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
-	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetEntry(cell_list_vector));
+	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetChild(cell_list_vector));
 
 	auto result_size = ListVector::GetListSize(result);
 
-	UnaryExecutor::Execute<list_entry_t, list_entry_t>(
-	    cell_list_vector, result, args.size(), [&](list_entry_t cell_list_entry) {
-		    // We need to prepare the list of values to pass in.
-		    auto compact_result = a5_compact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
-		    ThrowCellArrayError(compact_result, "a5_compact");
-		    if (compact_result.len == 0) {
-			    a5_free_cell_array(compact_result);
-			    return list_entry_t {0, 0};
-		    }
-		    ListVector::Reserve(result, result_size + compact_result.len);
-		    for (size_t i = 0; i < compact_result.len; i++) {
-			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
-		    }
-		    result_size += compact_result.len;
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(cell_list_vector, result, [&](list_entry_t cell_list_entry) {
+		// We need to prepare the list of values to pass in.
+		auto compact_result = a5_compact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
+		ThrowCellArrayError(compact_result, "a5_compact");
+		if (compact_result.len == 0) {
+			a5_free_cell_array(compact_result);
+			return list_entry_t(0, 0);
+		}
+		ListVector::Reserve(result, result_size + compact_result.len);
+		for (size_t i = 0; i < compact_result.len; i++) {
+			ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
+		}
+		result_size += compact_result.len;
 
-		    list_entry_t out {offset, compact_result.len};
-		    offset += compact_result.len;
-		    a5_free_cell_array(compact_result);
-		    return out;
-	    });
+		list_entry_t out(offset, compact_result.len);
+		offset += compact_result.len;
+		a5_free_cell_array(compact_result);
+		return out;
+	});
 }
 
 inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -324,35 +327,34 @@ inline void A5UncompactFun(DataChunk &args, ExpressionState &state, Vector &resu
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
-	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetEntry(cell_list_vector));
+	auto cell_list_data = FlatVector::GetData<uint64_t>(ListVector::GetChild(cell_list_vector));
 
 	auto result_size = ListVector::GetListSize(result);
 
-	UnaryExecutor::Execute<list_entry_t, list_entry_t>(
-	    cell_list_vector, result, args.size(), [&](list_entry_t cell_list_entry) {
-		    // We need to prepare the list of values to pass in.
-		    auto compact_result = a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
-		    ThrowCellArrayError(compact_result, "a5_uncompact");
-		    if (compact_result.len == 0) {
-			    a5_free_cell_array(compact_result);
-			    return list_entry_t {0, 0};
-		    }
-		    ListVector::Reserve(result, result_size + compact_result.len);
-		    for (size_t i = 0; i < compact_result.len; i++) {
-			    ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
-		    }
-		    result_size += compact_result.len;
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(cell_list_vector, result, [&](list_entry_t cell_list_entry) {
+		// We need to prepare the list of values to pass in.
+		auto compact_result = a5_uncompact(cell_list_data + cell_list_entry.offset, cell_list_entry.length);
+		ThrowCellArrayError(compact_result, "a5_uncompact");
+		if (compact_result.len == 0) {
+			a5_free_cell_array(compact_result);
+			return list_entry_t(0, 0);
+		}
+		ListVector::Reserve(result, result_size + compact_result.len);
+		for (size_t i = 0; i < compact_result.len; i++) {
+			ListVector::PushBack(result, Value::UBIGINT(compact_result.data[i]));
+		}
+		result_size += compact_result.len;
 
-		    list_entry_t out {offset, compact_result.len};
-		    offset += compact_result.len;
-		    a5_free_cell_array(compact_result);
-		    return out;
-	    });
+		list_entry_t out(offset, compact_result.len);
+		offset += compact_result.len;
+		a5_free_cell_array(compact_result);
+		return out;
+	});
 }
 
 inline void A5HexToU64Fun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto &hex_vector = args.data[0];
-	UnaryExecutor::Execute<string_t, uint64_t>(hex_vector, result, args.size(), [&](string_t hex) {
+	UnaryExecutor::Execute<string_t, uint64_t>(hex_vector, result, [&](string_t hex) {
 		struct ResultU64 res = a5_hex_to_u64(hex.GetString().c_str());
 		ThrowRustError(res.error, "a5_hex_to_u64");
 		return res.value;
@@ -363,7 +365,7 @@ inline void A5U64ToHexFun(DataChunk &args, ExpressionState &state, Vector &resul
 	auto &cell_vector = args.data[0];
 
 	UnifiedVectorFormat cell_format;
-	cell_vector.ToUnifiedFormat(args.size(), cell_format);
+	cell_vector.ToUnifiedFormat(cell_format);
 	auto input_data = UnifiedVectorFormat::GetData<uint64_t>(cell_format);
 
 	for (idx_t i = 0; i < args.size(); i++) {
@@ -375,7 +377,7 @@ inline void A5U64ToHexFun(DataChunk &args, ExpressionState &state, Vector &resul
 		char *hex_ptr = a5_u64_to_hex(input_data[idx]);
 		string hex_str(hex_ptr);
 		a5_free_string(hex_ptr);
-		FlatVector::GetData<string_t>(result)[i] = StringVector::AddString(result, hex_str);
+		FlatVector::GetDataMutable<string_t>(result)[i] = StringVector::AddString(result, hex_str);
 	}
 
 	if (args.size() == 1) {
@@ -388,7 +390,7 @@ inline void A5GetNumChildrenFun(DataChunk &args, ExpressionState &state, Vector 
 	auto &child_res_vector = args.data[1];
 
 	BinaryExecutor::Execute<int32_t, int32_t, uint64_t>(
-	    parent_res_vector, child_res_vector, result, args.size(), [&](int32_t parent_res, int32_t child_res) {
+	    parent_res_vector, child_res_vector, result, [&](int32_t parent_res, int32_t child_res) {
 		    ValidateResolutionOrWorld(parent_res, "a5_get_num_children");
 		    ValidateResolution(child_res, "a5_get_num_children");
 		    return static_cast<uint64_t>(a5_get_num_children(parent_res, child_res));
@@ -403,18 +405,18 @@ inline void A5SphericalCapFun(DataChunk &args, ExpressionState &state, Vector &r
 	auto &radius_vector = args.data[1];
 
 	BinaryExecutor::Execute<uint64_t, double, list_entry_t>(
-	    cell_vector, radius_vector, result, args.size(), [&](uint64_t cell_id, double radius) {
+	    cell_vector, radius_vector, result, [&](uint64_t cell_id, double radius) {
 		    auto cap_result = a5_spherical_cap(cell_id, radius);
 		    ThrowCellArrayError(cap_result, "a5_spherical_cap");
 
 		    if (cap_result.len == 0) {
 			    a5_free_cell_array(cap_result);
-			    return list_entry_t {0, 0};
+			    return list_entry_t(0, 0);
 		    }
 		    for (size_t i = 0; i < cap_result.len; i++) {
 			    ListVector::PushBack(result, Value::UBIGINT(cap_result.data[i]));
 		    }
-		    list_entry_t out {offset, cap_result.len};
+		    list_entry_t out(offset, cap_result.len);
 		    offset += cap_result.len;
 		    a5_free_cell_array(cap_result);
 		    return out;
@@ -429,7 +431,7 @@ inline void A5GridDiskFun(DataChunk &args, ExpressionState &state, Vector &resul
 	auto &k_vector = args.data[1];
 
 	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
-	    cell_vector, k_vector, result, args.size(), [&](uint64_t cell_id, int32_t k) {
+	    cell_vector, k_vector, result, [&](uint64_t cell_id, int32_t k) {
 		    if (k < 0) {
 			    throw InvalidInputException("a5_grid_disk: k must be >= 0");
 		    }
@@ -438,12 +440,12 @@ inline void A5GridDiskFun(DataChunk &args, ExpressionState &state, Vector &resul
 
 		    if (disk_result.len == 0) {
 			    a5_free_cell_array(disk_result);
-			    return list_entry_t {0, 0};
+			    return list_entry_t(0, 0);
 		    }
 		    for (size_t i = 0; i < disk_result.len; i++) {
 			    ListVector::PushBack(result, Value::UBIGINT(disk_result.data[i]));
 		    }
-		    list_entry_t out {offset, disk_result.len};
+		    list_entry_t out(offset, disk_result.len);
 		    offset += disk_result.len;
 		    a5_free_cell_array(disk_result);
 		    return out;
@@ -458,7 +460,7 @@ inline void A5GridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector 
 	auto &k_vector = args.data[1];
 
 	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
-	    cell_vector, k_vector, result, args.size(), [&](uint64_t cell_id, int32_t k) {
+	    cell_vector, k_vector, result, [&](uint64_t cell_id, int32_t k) {
 		    if (k < 0) {
 			    throw InvalidInputException("a5_grid_disk_vertex: k must be >= 0");
 		    }
@@ -467,12 +469,12 @@ inline void A5GridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector 
 
 		    if (disk_result.len == 0) {
 			    a5_free_cell_array(disk_result);
-			    return list_entry_t {0, 0};
+			    return list_entry_t(0, 0);
 		    }
 		    for (size_t i = 0; i < disk_result.len; i++) {
 			    ListVector::PushBack(result, Value::UBIGINT(disk_result.data[i]));
 		    }
-		    list_entry_t out {offset, disk_result.len};
+		    list_entry_t out(offset, disk_result.len);
 		    offset += disk_result.len;
 		    a5_free_cell_array(disk_result);
 		    return out;
@@ -481,26 +483,25 @@ inline void A5GridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector 
 
 inline void A5WorldCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.ColumnCount() == 0);
-	result.Reference(Value::UBIGINT(a5_world_cell()));
+	result.Reference(Value::UBIGINT(a5_world_cell()), count_t(args.size()));
 }
 
 inline void A5MaxResolutionFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.ColumnCount() == 0);
-	result.Reference(Value::INTEGER(MAX_RESOLUTION));
+	result.Reference(Value::INTEGER(MAX_RESOLUTION), count_t(args.size()));
 }
 
 inline void A5IsValidCellFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
-	                                       [&](uint64_t cell) { return a5_is_valid_cell(cell); });
+	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, [&](uint64_t cell) { return a5_is_valid_cell(cell); });
 }
 
 inline void A5IsCompactionMarkerFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result, args.size(),
+	UnaryExecutor::Execute<uint64_t, bool>(args.data[0], result,
 	                                       [&](uint64_t value) { return a5_is_compaction_marker(value); });
 }
 
 inline void A5MigrateFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	UnaryExecutor::Execute<uint64_t, uint64_t>(args.data[0], result, args.size(), [&](uint64_t cell) {
+	UnaryExecutor::Execute<uint64_t, uint64_t>(args.data[0], result, [&](uint64_t cell) {
 		struct ResultU64 res = a5_migrate(cell);
 		ThrowRustError(res.error, "a5_migrate");
 		return res.value;
@@ -509,7 +510,7 @@ inline void A5MigrateFun(DataChunk &args, ExpressionState &state, Vector &result
 
 inline void A5CellToSupercellFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	BinaryExecutor::Execute<uint64_t, int32_t, uint64_t>(
-	    args.data[0], args.data[1], result, args.size(), [&](uint64_t cell, int32_t resolution) {
+	    args.data[0], args.data[1], result, [&](uint64_t cell, int32_t resolution) {
 		    ValidateResolutionOrWorld(resolution, "a5_cell_to_supercell");
 		    struct ResultU64 res = a5_cell_to_supercell(cell, resolution);
 		    ThrowRustError(res.error, "a5_cell_to_supercell");
@@ -523,16 +524,16 @@ static list_entry_t PushCellArray(Vector &result, uint64_t &offset, CellArray &c
 	for (size_t i = 0; i < cells.len; i++) {
 		ListVector::PushBack(result, Value::UBIGINT(cells.data[i]));
 	}
-	list_entry_t out {offset, cells.len};
+	list_entry_t out(offset, cells.len);
 	offset += cells.len;
 	a5_free_cell_array(cells);
 	return out;
 }
 
 // The cell IDs of a LIST(UBIGINT) vector, as a contiguous array indexed by list_entry_t offsets.
-static const uint64_t *CellListData(Vector &cell_list_vector) {
-	auto &child = ListVector::GetEntry(cell_list_vector);
-	child.Flatten(ListVector::GetListSize(cell_list_vector));
+static const uint64_t *CellListData(const Vector &cell_list_vector) {
+	auto &child = ListVector::GetChild(cell_list_vector);
+	child.Flatten();
 	return FlatVector::GetData<uint64_t>(child);
 }
 
@@ -541,7 +542,7 @@ inline void A5CellToSubcellFun(DataChunk &args, ExpressionState &state, Vector &
 	uint64_t offset = 0;
 
 	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
-	    args.data[0], args.data[1], result, args.size(), [&](uint64_t cell, int32_t resolution) {
+	    args.data[0], args.data[1], result, [&](uint64_t cell, int32_t resolution) {
 		    ValidateResolution(resolution, "a5_cell_to_subcell");
 		    auto subcells = a5_cell_to_subcell(cell, resolution);
 		    return PushCellArray(result, offset, subcells, "a5_cell_to_subcell");
@@ -550,14 +551,14 @@ inline void A5CellToSubcellFun(DataChunk &args, ExpressionState &state, Vector &
 
 inline void A5CoveringResolutionFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cell_list_data = CellListData(args.data[0]);
-	UnaryExecutor::Execute<list_entry_t, int32_t>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+	UnaryExecutor::Execute<list_entry_t, int32_t>(args.data[0], result, [&](list_entry_t cells) {
 		return a5_covering_resolution(cell_list_data + cells.offset, cells.length);
 	});
 }
 
 inline void A5CountFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cell_list_data = CellListData(args.data[0]);
-	UnaryExecutor::Execute<list_entry_t, uint64_t>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+	UnaryExecutor::Execute<list_entry_t, uint64_t>(args.data[0], result, [&](list_entry_t cells) {
 		struct ResultU64 res = a5_count(cell_list_data + cells.offset, cells.length);
 		ThrowRustError(res.error, "a5_count");
 		return res.value;
@@ -566,7 +567,7 @@ inline void A5CountFun(DataChunk &args, ExpressionState &state, Vector &result) 
 
 inline void A5AreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cell_list_data = CellListData(args.data[0]);
-	UnaryExecutor::Execute<list_entry_t, double>(args.data[0], result, args.size(), [&](list_entry_t cells) {
+	UnaryExecutor::Execute<list_entry_t, double>(args.data[0], result, [&](list_entry_t cells) {
 		struct ResultF64 res = a5_area(cell_list_data + cells.offset, cells.length);
 		ThrowRustError(res.error, "a5_area");
 		return res.value;
@@ -576,7 +577,7 @@ inline void A5AreaFun(DataChunk &args, ExpressionState &state, Vector &result) {
 inline void A5ContainsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	auto cell_list_data = CellListData(args.data[0]);
 	BinaryExecutor::Execute<list_entry_t, uint64_t, bool>(
-	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t cells, uint64_t cell) {
+	    args.data[0], args.data[1], result, [&](list_entry_t cells, uint64_t cell) {
 		    struct ResultBool res = a5_contains(cell_list_data + cells.offset, cells.length, cell);
 		    ThrowRustError(res.error, "a5_contains");
 		    return res.value;
@@ -587,7 +588,7 @@ inline void A5OverlapsFun(DataChunk &args, ExpressionState &state, Vector &resul
 	auto a_data = CellListData(args.data[0]);
 	auto b_data = CellListData(args.data[1]);
 	BinaryExecutor::Execute<list_entry_t, list_entry_t, bool>(
-	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t a, list_entry_t b) {
+	    args.data[0], args.data[1], result, [&](list_entry_t a, list_entry_t b) {
 		    struct ResultBool res = a5_overlaps(a_data + a.offset, a.length, b_data + b.offset, b.length);
 		    ThrowRustError(res.error, "a5_overlaps");
 		    return res.value;
@@ -604,7 +605,7 @@ static void A5SetOperation(DataChunk &args, Vector &result, a5_set_operation_t o
 	auto a_data = CellListData(args.data[0]);
 	auto b_data = CellListData(args.data[1]);
 	BinaryExecutor::Execute<list_entry_t, list_entry_t, list_entry_t>(
-	    args.data[0], args.data[1], result, args.size(), [&](list_entry_t a, list_entry_t b) {
+	    args.data[0], args.data[1], result, [&](list_entry_t a, list_entry_t b) {
 		    auto cells = operation(a_data + a.offset, a.length, b_data + b.offset, b.length);
 		    return PushCellArray(result, offset, cells, function_name);
 	    });
@@ -668,18 +669,18 @@ inline void A5CellToGeometryFun(DataChunk &args, ExpressionState &state, Vector 
 	};
 
 	if (args.ColumnCount() == 1) {
-		UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result, args.size(),
+		UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result,
 		                                           [&](uint64_t cell_id) { return build(cell_id, -1); });
 	} else {
 		BinaryExecutor::Execute<uint64_t, int32_t, string_t>(
-		    args.data[0], args.data[1], result, args.size(),
+		    args.data[0], args.data[1], result,
 		    [&](uint64_t cell_id, int32_t segments) { return build(cell_id, segments <= 0 ? -1 : segments); });
 	}
 }
 
 // a5_cell_to_point: returns the cell center as a POINT GEOMETRY.
 inline void A5CellToPointFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result, args.size(), [&](uint64_t cell_id) {
+	UnaryExecutor::Execute<uint64_t, string_t>(args.data[0], result, [&](uint64_t cell_id) {
 		struct ResultLonLat ll = a5_cell_to_lon_lat(cell_id);
 		ThrowRustError(ll.error, "a5_cell_to_point");
 		string buf;
@@ -880,14 +881,14 @@ static void WkbReadGeometryToCells(WkbCursor &cur, int32_t resolution, bool over
 // Append an accumulator's cells to the result list vector.
 static list_entry_t PushCells(Vector &result, uint64_t &offset, idx_t &result_size, const vector<uint64_t> &cells) {
 	if (cells.empty()) {
-		return list_entry_t {offset, 0};
+		return list_entry_t(offset, 0);
 	}
 	ListVector::Reserve(result, result_size + cells.size());
 	for (auto cell : cells) {
 		ListVector::PushBack(result, Value::UBIGINT(cell));
 	}
 	result_size += cells.size();
-	list_entry_t out {offset, cells.size()};
+	list_entry_t out(offset, cells.size());
 	offset += cells.size();
 	return out;
 }
@@ -903,7 +904,7 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 
 	if (args.ColumnCount() == 2) {
 		BinaryExecutor::Execute<string_t, int32_t, list_entry_t>(
-		    args.data[0], args.data[1], result, args.size(), [&](string_t geom, int32_t resolution) {
+		    args.data[0], args.data[1], result, [&](string_t geom, int32_t resolution) {
 			    ValidateResolution(resolution, function_name);
 			    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 			    CellAccumulator acc;
@@ -915,8 +916,7 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 	}
 
 	TernaryExecutor::Execute<string_t, int32_t, bool, list_entry_t>(
-	    args.data[0], args.data[1], args.data[2], result, args.size(),
-	    [&](string_t geom, int32_t resolution, bool overlapping) {
+	    args.data[0], args.data[1], args.data[2], result, [&](string_t geom, int32_t resolution, bool overlapping) {
 		    ValidateResolution(resolution, function_name);
 		    WkbCursor cur {geom.GetData(), geom.GetSize(), 0, function_name};
 		    CellAccumulator acc;
@@ -927,9 +927,12 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
+	// DuckDB requires every scalar function that can raise an error (an out-of-range resolution, an
+	// invalid cell, ...) to be marked with SetFallible(); the few that never throw are left unmarked.
 	// a5_cell_area: Returns the area of a cell at a given resolution
 	{
 		auto func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description =
@@ -947,6 +950,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_cell_edge_length_avg", {LogicalType::INTEGER}, LogicalType::DOUBLE,
 		                           A5CellEdgeLengthAvgFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the average edge length in meters of an A5 cell at the specified resolution "
@@ -962,6 +966,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_get_num_cells: Returns the total number of cells at a given resolution
 	{
 		auto func = ScalarFunction("a5_get_num_cells", {LogicalType::INTEGER}, LogicalType::UBIGINT, A5GetNumCellsFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the total number of A5 cells at the specified resolution level (0-30)";
@@ -993,6 +998,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func =
 		    ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
 		                   LogicalType::UBIGINT, A5LonLatToCellFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Converts a longitude/latitude coordinate to an A5 cell at the specified resolution";
@@ -1010,6 +1016,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		func_set.AddFunction(
 		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::UBIGINT, A5CellToParentFun));
 		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::UBIGINT, A5CellToParentFun));
+		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
 		FunctionDescription desc1;
@@ -1036,6 +1043,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT},
 		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the center point [longitude, latitude] of an A5 cell";
@@ -1054,6 +1062,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
 		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT},
 		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
 		// Description for two-argument variant
@@ -1103,6 +1112,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
 		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
 		                                    A5CellToBoundaryFun));
+		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
 		// Description for one-argument variant
@@ -1140,6 +1150,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_compact", {LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Compacts a list of A5 cells by merging complete sets of sibling cells into parent cells. "
@@ -1157,6 +1168,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Expands a list of A5 cells to all their cells at the resolution of the list: the "
@@ -1173,6 +1185,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_hex_to_u64: Converts a hex string to a u64 cell ID
 	{
 		auto func = ScalarFunction("a5_hex_to_u64", {LogicalType::VARCHAR}, LogicalType::UBIGINT, A5HexToU64Fun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Converts an A5 hex string representation to a UBIGINT cell ID";
@@ -1202,6 +1215,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_get_num_children", {LogicalType::INTEGER, LogicalType::INTEGER},
 		                           LogicalType::UBIGINT, A5GetNumChildrenFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description =
@@ -1219,6 +1233,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_spherical_cap", {LogicalType::UBIGINT, LogicalType::DOUBLE},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5SphericalCapFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns all A5 cells within the specified radius (in meters) of the given cell, as a "
@@ -1236,6 +1251,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_grid_disk", {LogicalType::UBIGINT, LogicalType::INTEGER},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns all A5 cells within k edge-steps of the given cell (edge adjacency), as a "
@@ -1253,6 +1269,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_grid_disk_vertex", {LogicalType::UBIGINT, LogicalType::INTEGER},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskVertexFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns all A5 cells within k vertex-steps of the given cell (vertex adjacency), as a "
@@ -1322,8 +1339,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                   "compaction marker is not a cell";
 		desc.parameter_names = {"value"};
 		desc.parameter_types = {LogicalType::UBIGINT};
-		desc.examples = {
-		    "list_filter(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), x -> NOT a5_is_compaction_marker(x))"};
+		desc.examples = {"list_filter(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 1), lambda x: NOT "
+		                 "a5_is_compaction_marker(x))"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
@@ -1349,6 +1366,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_count", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::UBIGINT, A5CountFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the number of cells in a list of A5 cells at its resolution, i.e. the length of "
@@ -1366,6 +1384,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_area", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::DOUBLE, A5AreaFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the total area in square meters of a list of A5 cells (compacted or not). "
@@ -1382,6 +1401,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_contains", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::UBIGINT},
 		                           LogicalType::BOOLEAN, A5ContainsFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns true if the cell is in the list of A5 cells (compacted or not). The cell must be "
@@ -1401,6 +1421,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func = ScalarFunction("a5_overlaps",
 		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::BOOLEAN, A5OverlapsFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns true if two lists of A5 cells (compacted or not) share any cell. Both lists must "
@@ -1419,6 +1440,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func = ScalarFunction("a5_union",
 		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5UnionFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the union of two lists of A5 cells: the cells in either. Both lists must be at the "
@@ -1438,6 +1460,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func = ScalarFunction("a5_intersect",
 		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5IntersectFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the intersection of two lists of A5 cells: the cells in both. Both lists must be "
@@ -1457,6 +1480,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		auto func = ScalarFunction("a5_difference",
 		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5DifferenceFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the difference of two lists of A5 cells: the cells in a but not in b. Both lists "
@@ -1476,6 +1500,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_cell_to_supercell", {LogicalType::UBIGINT, LogicalType::INTEGER},
 		                           LogicalType::UBIGINT, A5CellToSupercellFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the A5 cell at the specified coarser resolution that contains the center of the "
@@ -1493,6 +1518,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func = ScalarFunction("a5_cell_to_subcell", {LogicalType::UBIGINT, LogicalType::INTEGER},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the A5 cells at the specified finer resolution whose centers lie in the cell: the "
@@ -1510,6 +1536,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_migrate: Migrates a cell ID from the a5 0.x index to the a5 1.0 index
 	{
 		auto func = ScalarFunction("a5_migrate", {LogicalType::UBIGINT}, LogicalType::UBIGINT, A5MigrateFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Migrates an A5 cell ID created by a pre-1.0 version of A5 (a5 crate <= 0.10) to the ID of "
@@ -1530,6 +1557,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
 		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN},
 		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
 		FunctionDescription desc1;
@@ -1565,6 +1593,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
 		func_set.AddFunction(
 		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
 		FunctionDescription desc1;
@@ -1591,6 +1620,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_cell_to_point", {LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToPointFun);
+		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the center of an A5 cell as a POINT geometry";

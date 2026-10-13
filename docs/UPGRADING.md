@@ -26,7 +26,7 @@ code written against an earlier version of the extension.
   `a5_geometry_to_cells`, `a5_grid_disk`, `a5_spherical_cap` and `a5_compact` this is a drop-in
   change. To expand a hand-built list of cells to a chosen resolution, expand each cell instead:
   ```sql
-  SELECT flatten(list_transform(cells, c -> a5_cell_to_children(c, 12)));
+  SELECT flatten(list_transform(cells, lambda c: a5_cell_to_children(c, 12)));
   ```
 - **`a5_get_num_cells` is exact** at resolutions 28-30, where it previously returned rounded values.
 - **Resolution `-1` is accepted** as the world cell by `a5_cell_to_parent`, `a5_cell_to_supercell`,
@@ -60,7 +60,7 @@ without a marker, whose resolution is then that of its finest cell.
 
 Because the marker is not a cell, expand a covering before treating its elements as cells
 (`unnest(a5_uncompact(cells))`), or drop the marker with
-`list_filter(cells, x -> NOT a5_is_compaction_marker(x))` if you want the compacted cells themselves.
+`list_filter(cells, lambda x: NOT a5_is_compaction_marker(x))` if you want the compacted cells themselves.
 
 ```sql
 SELECT a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 15), 1) as neighbors;

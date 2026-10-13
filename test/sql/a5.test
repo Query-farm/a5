@@ -232,7 +232,7 @@ select a5_cell_to_parent(a5_lonlat_to_cell(44, 55, columns(*)::integer), columns
 
 # a5_lon_lat get the center of the A5 cell.
 query I
-select list_transform(a5_cell_to_lonlat(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> round(x)) from range(1, 30);
+select list_transform(a5_cell_to_lonlat(a5_lonlat_to_cell(44, 55, columns(*)::integer)), lambda x: round(x)) from range(1, 30);
 ----
 [30.0, 68.0]
 [40.0, 52.0]
@@ -307,7 +307,7 @@ select a5_cell_to_children(a5_lonlat_to_cell(44, 55, columns(*)::integer), colum
 
 # Get the coordinates of the boundary of any A5 cell with at_boundary
 query I
-select list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> list_transform(x, y-> round(y, 3))) from range(1, 30);
+select list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), lambda x: list_transform(x, lambda y: round(y, 3))) from range(1, 30);
 ----
 [[60.65, 68.51], [60.65, 69.19], [60.65, 69.868], [60.65, 70.547], [60.65, 71.224], [60.65, 71.901], [60.65, 72.577], [60.65, 73.252], [60.65, 73.927], [60.65, 74.601], [60.65, 75.275], [60.65, 75.948], [60.65, 76.621], [60.65, 77.293], [60.65, 77.964], [60.65, 78.635], [60.65, 79.306], [60.65, 79.976], [60.65, 80.646], [60.65, 81.316], [60.65, 81.985], [60.65, 82.654], [60.65, 83.323], [60.65, 83.991], [60.65, 84.659], [60.65, 85.327], [60.65, 85.995], [60.65, 86.663], [60.65, 87.33], [60.65, 87.998], [60.65, 88.665], [60.65, 89.333], [-93.0, 90.0], [-11.35, 89.333], [-11.35, 88.665], [-11.35, 87.998], [-11.35, 87.33], [-11.35, 86.663], [-11.35, 85.995], [-11.35, 85.327], [-11.35, 84.659], [-11.35, 83.991], [-11.35, 83.323], [-11.35, 82.654], [-11.35, 81.985], [-11.35, 81.316], [-11.35, 80.646], [-11.35, 79.976], [-11.35, 79.306], [-11.35, 78.635], [-11.35, 77.964], [-11.35, 77.293], [-11.35, 76.621], [-11.35, 75.948], [-11.35, 75.275], [-11.35, 74.601], [-11.35, 73.927], [-11.35, 73.252], [-11.35, 72.577], [-11.35, 71.901], [-11.35, 71.224], [-11.35, 70.547], [-11.35, 69.868], [-11.35, 69.19], [-11.35, 68.51], [-10.0, 68.111], [-8.699, 67.704], [-7.445, 67.287], [-6.236, 66.862], [-5.07, 66.428], [-3.946, 65.987], [-2.862, 65.539], [-1.816, 65.084], [-0.808, 64.622], [0.164, 64.154], [1.102, 63.68], [2.008, 63.201], [2.882, 62.716], [3.726, 62.227], [4.541, 61.732], [5.329, 61.233], [6.09, 60.729], [6.826, 60.221], [7.538, 59.709], [8.227, 59.193], [8.893, 58.674], [9.539, 58.15], [10.164, 57.624], [10.769, 57.094], [11.356, 56.561], [11.924, 56.024], [12.476, 55.485], [13.011, 54.943], [13.531, 54.398], [14.035, 53.85], [14.524, 53.299], [15.0, 52.746], [16.025, 52.711], [17.049, 52.669], [18.07, 52.619], [19.089, 52.561], [20.105, 52.495], [21.119, 52.422], [22.129, 52.341], [23.135, 52.252], [24.138, 52.156], [25.137, 52.052], [26.132, 51.94], [27.123, 51.821], [28.109, 51.695], [29.09, 51.561], [30.066, 51.419], [31.037, 51.27], [32.003, 51.113], [32.963, 50.949], [33.918, 50.778], [34.867, 50.599], [35.809, 50.413], [36.746, 50.219], [37.676, 50.017], [38.599, 49.809], [39.517, 49.593], [40.427, 49.369], [41.33, 49.138], [42.227, 48.9], [43.116, 48.654], [43.998, 48.401], [44.872, 48.141], [45.74, 47.872], [46.009, 48.534], [46.285, 49.195], [46.568, 49.855], [46.857, 50.514], [47.153, 51.173], [47.456, 51.832], [47.768, 52.49], [48.087, 53.147], [48.415, 53.805], [48.752, 54.462], [49.099, 55.118], [49.456, 55.775], [49.824, 56.431], [50.203, 57.086], [50.595, 57.742], [51.0, 58.397], [51.42, 59.051], [51.858, 59.702], [52.314, 60.351], [52.791, 60.997], [53.288, 61.641], [53.808, 62.281], [54.352, 62.919], [54.922, 63.554], [55.519, 64.186], [56.145, 64.815], [56.803, 65.44], [57.494, 66.062], [58.222, 66.68], [58.989, 67.294], [59.797, 67.904], [60.65, 68.51]]
 [[31.037, 51.27], [31.476, 50.632], [31.901, 49.993], [32.313, 49.352], [32.714, 48.71], [33.103, 48.067], [33.482, 47.423], [33.851, 46.777], [34.209, 46.13], [34.559, 45.482], [34.9, 44.832], [35.233, 44.181], [35.557, 43.529], [35.875, 42.875], [36.186, 42.22], [36.49, 41.563], [36.788, 40.904], [37.415, 41.379], [38.056, 41.844], [38.713, 42.301], [39.383, 42.749], [40.067, 43.188], [40.764, 43.619], [41.474, 44.042], [42.197, 44.456], [42.931, 44.862], [43.677, 45.259], [44.435, 45.649], [45.204, 46.03], [45.984, 46.404], [46.774, 46.769], [47.576, 47.127], [48.387, 47.476], [48.521, 48.155], [48.658, 48.834], [48.798, 49.514], [48.941, 50.194], [49.088, 50.874], [49.238, 51.555], [49.392, 52.237], [49.551, 52.918], [49.713, 53.601], [49.881, 54.284], [50.053, 54.968], [50.23, 55.652], [50.413, 56.337], [50.602, 57.023], [50.798, 57.71], [51.0, 58.397], [49.94, 58.72], [48.858, 59.034], [47.756, 59.339], [46.632, 59.634], [45.487, 59.919], [44.321, 60.194], [43.134, 60.459], [41.926, 60.714], [40.699, 60.957], [39.451, 61.19], [38.185, 61.412], [36.899, 61.623], [35.595, 61.821], [34.273, 62.009], [32.935, 62.184], [31.58, 62.348], [31.572, 61.667], [31.564, 60.986], [31.556, 60.303], [31.549, 59.619], [31.542, 58.934], [31.535, 58.247], [31.529, 57.56], [31.523, 56.871], [31.462, 56.172], [31.401, 55.474], [31.34, 54.774], [31.279, 54.075], [31.218, 53.375], [31.157, 52.674], [31.097, 51.972], [31.037, 51.27]]
@@ -342,8 +342,8 @@ select list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::
 
 query II
 select
-  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false), x -> list_transform(x, y-> round(y, 3)))) as open,
-  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), x -> list_transform(x, y-> round(y, 3)))) as closed
+  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false), lambda x: list_transform(x, lambda y: round(y, 3)))) as open,
+  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer)), lambda x: list_transform(x, lambda y: round(y, 3)))) as closed
 from range(1, 30);
 ----
 160	161
@@ -379,8 +379,8 @@ from range(1, 30);
 
 query II
 select
-  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false, 5), x -> list_transform(x, y-> round(y, 3)))) as a,
-  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false), x -> list_transform(x, y-> round(y, 3)))) as b
+  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false, 5), lambda x: list_transform(x, lambda y: round(y, 3)))) as a,
+  length(list_transform(a5_cell_to_boundary(a5_lonlat_to_cell(44, 55, columns(*)::integer), false), lambda x: list_transform(x, lambda y: round(y, 3)))) as b
 from range(1, 30);
 ----
 25	160
@@ -459,7 +459,7 @@ select a5_uncompact([a5_lonlat_to_cell(-122.4, 37.8, 10)], 12)
 No function matches
 
 query I
-select len(flatten(list_transform(a5_cell_to_children(360287970189639680::ubigint), c -> a5_cell_to_children(c, 3))))
+select len(flatten(list_transform(a5_cell_to_children(360287970189639680::ubigint), lambda c: a5_cell_to_children(c, 3))))
 ----
 16
 
@@ -730,7 +730,7 @@ true
 # a5_geometry_to_cells: polygon parts mixed with other parts still give one covering - cells
 # in curve order with a single trailing marker - that includes the other parts' cells
 query III
-select list_count(list_filter(cells, x -> a5_is_compaction_marker(x))),
+select list_count(list_filter(cells, lambda x: a5_is_compaction_marker(x))),
        a5_is_compaction_marker(cells[-1]),
        a5_contains(cells, a5_lonlat_to_cell(50, 50, 4))
 from (select a5_geometry_to_cells('GEOMETRYCOLLECTION(POINT(50 50), POLYGON((0 0, 5 0, 5 5, 0 5, 0 0)))'::GEOMETRY, 4) as cells)
@@ -739,7 +739,7 @@ from (select a5_geometry_to_cells('GEOMETRYCOLLECTION(POINT(50 50), POLYGON((0 0
 
 # a5_geometry_to_cells: geometries without polygon parts carry no compaction marker
 query I
-select list_count(list_filter(a5_geometry_to_cells('LINESTRING(0 0, 10 10, 20 5)'::GEOMETRY, 5), x -> a5_is_compaction_marker(x)))
+select list_count(list_filter(a5_geometry_to_cells('LINESTRING(0 0, 10 10, 20 5)'::GEOMETRY, 5), lambda x: a5_is_compaction_marker(x)))
 ----
 0
 
