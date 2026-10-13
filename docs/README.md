@@ -20,6 +20,11 @@ Full documentation, including installation, usage, the function reference, and c
 
 **[https://query.farm/products/extensions/a5](https://query.farm/products/extensions/a5)**
 
+## Upgrading to A5 1.0
+
+This version is built on A5 1.0, which changes cell IDs and the shape of some results. If you have
+stored cell IDs or existing queries, read **[UPGRADING.md](UPGRADING.md)** first.
+
 ## Installation
 
 ```sql
