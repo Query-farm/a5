@@ -86,9 +86,9 @@ The Rust FFI functions `a5_line_string_to_cells` / `a5_polygon_to_cells` are **i
 
 ### A5 1.0: cell index and coverings
 
-- **Cell IDs changed in a5 1.0** (the "v1 index"). IDs produced by a5 <= 0.10 name the same cells but have different values; `a5_migrate` converts them. Expected cell IDs in tests and the README are v1 values.
+- **Cell IDs changed in a5 1.0** (the "v1 index"). IDs produced by a5 <= 0.10 name the same cells but have different values; `a5_migrate` converts them. Expected cell IDs in tests are v1 values.
 - **Coverings**: `a5_compact`, `a5_grid_disk`, `a5_grid_disk_vertex`, `a5_spherical_cap`, `a5_cell_to_subcell`, `a5_union` / `a5_intersect` / `a5_difference` and polygon results of `a5_geometry_to_cells` return compacted cells sorted in curve order **followed by a compaction marker** — a `UBIGINT` that is not a cell and records the resolution the cells stand for. The marker is passed through to SQL unchanged so that `a5_uncompact(cells)` and the set operations know the resolution; `a5_is_compaction_marker` identifies it.
-- `a5_uncompact(cells)` expands to the covering's own resolution, as upstream does; the pre-1.0 `a5_uncompact(cells, target_resolution)` form was removed (1.0 is a breaking release — user-facing changes are listed in the README's "Upgrading to A5 1.0" section).
+- `a5_uncompact(cells)` expands to the covering's own resolution, as upstream does; the pre-1.0 `a5_uncompact(cells, target_resolution)` form was removed (1.0 is a breaking release — user-facing changes are listed in `docs/UPGRADING.md`). The README is intentionally minimal; the full function reference lives at https://query.farm/products/extensions/a5 and must be updated there.
 - Only the crate's top-level re-exports (`a5::*`) are supported API; `a5::core::*` etc. are `#[doc(hidden)]` — do not reach into them.
 
 ### Build System
