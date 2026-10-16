@@ -11,7 +11,7 @@
 #include <unordered_set>
 namespace duckdb {
 
-#define A5_EXTENSION_VERSION "2026101304"
+#define A5_EXTENSION_VERSION "2026101601"
 
 // The finest A5 resolution, as defined by the a5 crate.
 static const int32_t MAX_RESOLUTION = a5_max_resolution();
@@ -536,15 +536,15 @@ static const uint64_t *CellListData(Vector &cell_list_vector) {
 	return FlatVector::GetData<uint64_t>(child);
 }
 
-inline void A5CellToSubcellFun(DataChunk &args, ExpressionState &state, Vector &result) {
+inline void A5CellToSubcellsFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	ListVector::Reserve(result, args.size() * 4);
 	uint64_t offset = 0;
 
 	BinaryExecutor::Execute<uint64_t, int32_t, list_entry_t>(
 	    args.data[0], args.data[1], result, args.size(), [&](uint64_t cell, int32_t resolution) {
-		    ValidateResolution(resolution, "a5_cell_to_subcell");
-		    auto subcells = a5_cell_to_subcell(cell, resolution);
-		    return PushCellArray(result, offset, subcells, "a5_cell_to_subcell");
+		    ValidateResolution(resolution, "a5_cell_to_subcells");
+		    auto subcells = a5_cell_to_subcells(cell, resolution);
+		    return PushCellArray(result, offset, subcells, "a5_cell_to_subcells");
 	    });
 }
 
@@ -1317,7 +1317,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns true if the value is a compaction marker: the last element of a covering (as "
-		                   "returned by a5_compact, a5_grid_disk, a5_spherical_cap, a5_cell_to_subcell, polygon "
+		                   "returned by a5_compact, a5_grid_disk, a5_spherical_cap, a5_cell_to_subcells, polygon "
 		                   "coverings and the set operations), recording the resolution its cells stand for. A "
 		                   "compaction marker is not a cell";
 		desc.parameter_names = {"value"};
@@ -1489,10 +1489,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 		loader.RegisterFunction(std::move(info));
 	}
 
-	// a5_cell_to_subcell: Returns the finer cells whose centers lie in a cell
+	// a5_cell_to_subcells: Returns the finer cells whose centers lie in a cell
 	{
-		auto func = ScalarFunction("a5_cell_to_subcell", {LogicalType::UBIGINT, LogicalType::INTEGER},
-		                           LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellFun);
+		auto func = ScalarFunction("a5_cell_to_subcells", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		                           LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellsFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the A5 cells at the specified finer resolution whose centers lie in the cell: the "
@@ -1501,7 +1501,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                   "marker recording the resolution - use a5_uncompact to expand it";
 		desc.parameter_names = {"cell", "resolution"};
 		desc.parameter_types = {LogicalType::UBIGINT, LogicalType::INTEGER};
-		desc.examples = {"a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)"};
+		desc.examples = {"a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)"};
 		desc.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));

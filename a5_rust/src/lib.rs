@@ -450,8 +450,8 @@ pub extern "C" fn a5_cell_to_supercell(cell: u64, resolution: i32) -> ResultU64 
 }
 
 #[no_mangle]
-pub extern "C" fn a5_cell_to_subcell(cell: u64, resolution: i32) -> CellArray {
-    cell_vec_result_to_c(guard(|| a5::cell_to_subcell(cell, resolution)))
+pub extern "C" fn a5_cell_to_subcells(cell: u64, resolution: i32) -> CellArray {
+    cell_vec_result_to_c(guard(|| a5::cell_to_subcells(cell, resolution)))
 }
 
 // Migrates a cell ID from the v0 index (a5 <= 0.10) to the v1 index (a5 >= 1.0).

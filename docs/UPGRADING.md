@@ -53,7 +53,7 @@ the cells stand for. Without it a compacted list could not be expanded again: a 
 compacts to a single resolution-5 cell would look the same whether it was built at resolution 6
 or 12.
 
-`a5_compact`, `a5_grid_disk`, `a5_grid_disk_vertex`, `a5_spherical_cap`, `a5_cell_to_subcell`,
+`a5_compact`, `a5_grid_disk`, `a5_grid_disk_vertex`, `a5_spherical_cap`, `a5_cell_to_subcells`,
 `a5_union`, `a5_intersect`, `a5_difference` and polygon results of `a5_geometry_to_cells` all return
 coverings. Every function taking a list of cells accepts a covering, and also a plain list of cells
 without a marker, whose resolution is then that of its finest cell.
@@ -86,11 +86,11 @@ SELECT unnest(a5_uncompact(a5_grid_disk(a5_lonlat_to_cell(-74.0060, 40.7128, 15)
 | `a5_overlaps(a, b)` | `BOOLEAN` | Whether two sets share any cell |
 | `a5_contains(cells, cell)` | `BOOLEAN` | Whether a cell is in a set |
 | `a5_cell_to_supercell(cell, res)` | `UBIGINT` | Coarser cell containing the cell's center |
-| `a5_cell_to_subcell(cell, res)` | `UBIGINT[]` | Finer cells whose centers lie in the cell |
+| `a5_cell_to_subcells(cell, res)` | `UBIGINT[]` | Finer cells whose centers lie in the cell |
 | `a5_max_resolution()` | `INTEGER` | The finest resolution (`30`) |
 
 The set operations and `a5_contains` need both arguments at the same resolution and raise an error
-otherwise. `a5_cell_to_supercell` / `a5_cell_to_subcell` are the spatial counterparts of
+otherwise. `a5_cell_to_supercell` / `a5_cell_to_subcells` are the spatial counterparts of
 `a5_cell_to_parent` / `a5_cell_to_children`: A5 cells do not nest exactly across resolutions, so the
 parent of a cell need not contain it, while its supercell always contains its center.
 

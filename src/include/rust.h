@@ -132,7 +132,7 @@ ResultBool a5_contains(const uint64_t *cells, uintptr_t len, uint64_t cell);
 
 ResultU64 a5_cell_to_supercell(uint64_t cell, int32_t resolution);
 
-CellArray a5_cell_to_subcell(uint64_t cell, int32_t resolution);
+CellArray a5_cell_to_subcells(uint64_t cell, int32_t resolution);
 
 ResultU64 a5_migrate(uint64_t cell);
 
