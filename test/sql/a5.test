@@ -838,29 +838,29 @@ select a5_cell_to_supercell(a5_lonlat_to_cell(-122.4, 37.8, 5), 6)
 ----
 a5_cell_to_supercell: Target resolution (6) must be equal to or less than current resolution (5)
 
-# a5_cell_to_subcell: the finer cells whose centers lie in a cell, as a covering
+# a5_cell_to_subcells: the finer cells whose centers lie in a cell, as a covering
 query II
-select a5_count(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)),
-       a5_covering_resolution(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))
+select a5_count(a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 8)),
+       a5_covering_resolution(a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))
 ----
 62	8
 
-# a5_cell_to_subcell is the inverse of a5_cell_to_supercell
+# a5_cell_to_subcells is the inverse of a5_cell_to_supercell
 query I
 select bool_and(a5_cell_to_supercell(c, 5) = a5_lonlat_to_cell(-122.4, 37.8, 5))
-from (select unnest(a5_uncompact(a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))) as c)
+from (select unnest(a5_uncompact(a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 8))) as c)
 ----
 true
 
 statement error
-select a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 4)
+select a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 4)
 ----
-a5_cell_to_subcell: Target resolution (4) must be equal to or greater than current resolution (5)
+a5_cell_to_subcells: Target resolution (4) must be equal to or greater than current resolution (5)
 
 statement error
-select a5_cell_to_subcell(a5_lonlat_to_cell(-122.4, 37.8, 5), 31)
+select a5_cell_to_subcells(a5_lonlat_to_cell(-122.4, 37.8, 5), 31)
 ----
-a5_cell_to_subcell: Resolution must be between 0 and 30
+a5_cell_to_subcells: Resolution must be between 0 and 30
 
 # a5_migrate: cell IDs created by a5 <= 0.10 map to the IDs of the same cells in the a5 1.0 index.
 # These are the IDs a5 0.10 gave a5_lonlat_to_cell(44, 55, resolution) at resolutions 2 to 29.
