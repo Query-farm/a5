@@ -16,7 +16,7 @@
 #include <unordered_set>
 namespace duckdb {
 
-#define A5_EXTENSION_VERSION "2026101601"
+#define A5_EXTENSION_VERSION "2026102001"
 
 // The finest A5 resolution, as defined by the a5 crate.
 static const int32_t MAX_RESOLUTION = a5_max_resolution();
