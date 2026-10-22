@@ -1,0 +1,60 @@
+# name: test/sql/a5_parameter_names.test
+# description: duckdb_functions() reports the declared parameter names instead of col<N>
+# group: [a5]
+
+require a5
+
+query II
+SELECT DISTINCT function_name, parameters FROM duckdb_functions()
+WHERE function_name IN ('a5_area', 'a5_cell_area', 'a5_cell_edge_length_avg', 'a5_cell_to_boundary', 'a5_cell_to_children', 'a5_cell_to_geometry', 'a5_cell_to_lonlat', 'a5_cell_to_parent', 'a5_cell_to_point', 'a5_cell_to_subcells', 'a5_cell_to_supercell', 'a5_compact', 'a5_contains', 'a5_count', 'a5_covering_resolution', 'a5_difference', 'a5_geometry_to_cells', 'a5_get_num_cells', 'a5_get_num_children', 'a5_get_res0_cells', 'a5_get_resolution', 'a5_grid_disk', 'a5_grid_disk_vertex', 'a5_hex_to_u64', 'a5_intersect', 'a5_is_compaction_marker', 'a5_is_valid_cell', 'a5_lonlat_to_cell', 'a5_max_resolution', 'a5_migrate', 'a5_overlaps', 'a5_spherical_cap', 'a5_u64_to_hex', 'a5_uncompact', 'a5_union', 'a5_world_cell')
+ORDER BY ALL;
+----
+a5_area	[cells]
+a5_cell_area	[resolution]
+a5_cell_edge_length_avg	[resolution]
+a5_cell_to_boundary	[cell]
+a5_cell_to_boundary	[cell, closed_ring]
+a5_cell_to_boundary	[cell, closed_ring, segments]
+a5_cell_to_children	[cell]
+a5_cell_to_children	[cell, child_resolution]
+a5_cell_to_geometry	[cell]
+a5_cell_to_geometry	[cell, segments]
+a5_cell_to_lonlat	[cell]
+a5_cell_to_parent	[cell]
+a5_cell_to_parent	[cell, parent_resolution]
+a5_cell_to_point	[cell]
+a5_cell_to_subcells	[cell, resolution]
+a5_cell_to_supercell	[cell, resolution]
+a5_compact	[cells]
+a5_contains	[cells, cell]
+a5_count	[cells]
+a5_covering_resolution	[cells]
+a5_difference	[a, b]
+a5_geometry_to_cells	[geom, resolution]
+a5_geometry_to_cells	[geom, resolution, overlapping]
+a5_get_num_cells	[resolution]
+a5_get_num_children	[parent_resolution, child_resolution]
+a5_get_res0_cells	[]
+a5_get_resolution	[cell]
+a5_grid_disk	[cell, k]
+a5_grid_disk_vertex	[cell, k]
+a5_hex_to_u64	[hex]
+a5_intersect	[a, b]
+a5_is_compaction_marker	[value]
+a5_is_valid_cell	[cell]
+a5_lonlat_to_cell	[longitude, latitude, resolution]
+a5_max_resolution	[]
+a5_migrate	[cell]
+a5_overlaps	[a, b]
+a5_spherical_cap	[cell, radius]
+a5_u64_to_hex	[cell]
+a5_uncompact	[cells]
+a5_union	[a, b]
+a5_world_cell	[]
+
+# The parameters are still positional: calls work as before
+
+query II
+SELECT a5_get_num_cells(0), a5_get_resolution(a5_lonlat_to_cell(55, 44, 5));
+----
+12	5

@@ -16,7 +16,7 @@
 #include <unordered_set>
 namespace duckdb {
 
-#define A5_EXTENSION_VERSION "2026102001"
+#define A5_EXTENSION_VERSION "2026102101"
 
 // The finest A5 resolution, as defined by the a5 crate.
 static const int32_t MAX_RESOLUTION = a5_max_resolution();
@@ -926,12 +926,18 @@ inline void A5GeometryToCellsFun(DataChunk &args, ExpressionState &state, Vector
 	    });
 }
 
+// Declares a positional-only parameter with a real name, so duckdb_functions() reports it instead of col<N>.
+static FunctionParameter Positional(const char *name, LogicalType type) {
+	return FunctionParameter(name, std::move(type), {}, FunctionParameterKind::POSITIONAL_ONLY);
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	// DuckDB requires every scalar function that can raise an error (an out-of-range resolution, an
 	// invalid cell, ...) to be marked with SetFallible(); the few that never throw are left unmarked.
 	// a5_cell_area: Returns the area of a cell at a given resolution
 	{
-		auto func = ScalarFunction("a5_cell_area", {LogicalType::INTEGER}, LogicalType::DOUBLE, A5CellAreaFun);
+		auto func = ScalarFunction("a5_cell_area", {Positional("resolution", LogicalType::INTEGER)},
+		                           LogicalType::DOUBLE, A5CellAreaFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -948,8 +954,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_edge_length_avg: Returns the average edge length of a cell at a given resolution
 	{
-		auto func = ScalarFunction("a5_cell_edge_length_avg", {LogicalType::INTEGER}, LogicalType::DOUBLE,
-		                           A5CellEdgeLengthAvgFun);
+		auto func = ScalarFunction("a5_cell_edge_length_avg", {Positional("resolution", LogicalType::INTEGER)},
+		                           LogicalType::DOUBLE, A5CellEdgeLengthAvgFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -965,7 +971,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_get_num_cells: Returns the total number of cells at a given resolution
 	{
-		auto func = ScalarFunction("a5_get_num_cells", {LogicalType::INTEGER}, LogicalType::UBIGINT, A5GetNumCellsFun);
+		auto func = ScalarFunction("a5_get_num_cells", {Positional("resolution", LogicalType::INTEGER)},
+		                           LogicalType::UBIGINT, A5GetNumCellsFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -980,8 +987,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_get_resolution: Returns the resolution of a cell
 	{
-		auto func =
-		    ScalarFunction("a5_get_resolution", {LogicalType::UBIGINT}, LogicalType::INTEGER, A5GetResolutionFun);
+		auto func = ScalarFunction("a5_get_resolution", {Positional("cell", LogicalType::UBIGINT)},
+		                           LogicalType::INTEGER, A5GetResolutionFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the resolution level (0-30) of an A5 cell";
@@ -996,8 +1003,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_lonlat_to_cell: Converts longitude/latitude to a cell
 	{
 		auto func =
-		    ScalarFunction("a5_lonlat_to_cell", {LogicalType::DOUBLE, LogicalType::DOUBLE, LogicalType::INTEGER},
-		                   LogicalType::UBIGINT, A5LonLatToCellFun);
+		    ScalarFunction("a5_lonlat_to_cell",
+			               {Positional("longitude", LogicalType::DOUBLE), Positional("latitude", LogicalType::DOUBLE),
+			                Positional("resolution", LogicalType::INTEGER)},
+			               LogicalType::UBIGINT, A5LonLatToCellFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1013,9 +1022,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_to_parent: Returns the parent cell at a given resolution
 	{
 		ScalarFunctionSet func_set("a5_cell_to_parent");
+		func_set.AddFunction(ScalarFunction(
+		    {Positional("cell", LogicalType::UBIGINT), Positional("parent_resolution", LogicalType::INTEGER)},
+		    LogicalType::UBIGINT, A5CellToParentFun));
 		func_set.AddFunction(
-		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::UBIGINT, A5CellToParentFun));
-		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::UBIGINT, A5CellToParentFun));
+		    ScalarFunction({Positional("cell", LogicalType::UBIGINT)}, LogicalType::UBIGINT, A5CellToParentFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1041,7 +1052,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_lonlat: Returns the center longitude/latitude of a cell
 	{
-		auto func = ScalarFunction("a5_cell_to_lonlat", {LogicalType::UBIGINT},
+		auto func = ScalarFunction("a5_cell_to_lonlat", {Positional("cell", LogicalType::UBIGINT)},
 		                           LogicalType::ARRAY(LogicalType::DOUBLE, 2), A5CellToLonLatFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1058,9 +1069,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_to_children: Returns child cells
 	{
 		ScalarFunctionSet func_set("a5_cell_to_children");
-		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT, LogicalType::INTEGER},
-		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
-		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {LogicalType::UBIGINT},
+		func_set.AddFunction(ScalarFunction(
+		    "a5_cell_to_children",
+		    {Positional("cell", LogicalType::UBIGINT), Positional("child_resolution", LogicalType::INTEGER)},
+		    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
+		func_set.AddFunction(ScalarFunction("a5_cell_to_children", {Positional("cell", LogicalType::UBIGINT)},
 		                                    LogicalType::LIST(LogicalType::UBIGINT), A5CellToChildrenFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
@@ -1103,15 +1116,16 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_to_boundary: Returns the boundary polygon vertices
 	{
 		ScalarFunctionSet func_set("a5_cell_to_boundary");
-		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT},
+		func_set.AddFunction(ScalarFunction({Positional("cell", LogicalType::UBIGINT)},
 		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
 		                                    A5CellToBoundaryFun));
-		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN},
-		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
-		                                    A5CellToBoundaryFun));
-		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT, LogicalType::BOOLEAN, LogicalType::INTEGER},
-		                                    LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)),
-		                                    A5CellToBoundaryFun));
+		func_set.AddFunction(
+		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("closed_ring", LogicalType::BOOLEAN)},
+			               LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
+		func_set.AddFunction(
+		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("closed_ring", LogicalType::BOOLEAN),
+			                Positional("segments", LogicalType::INTEGER)},
+			               LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1148,7 +1162,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_compact: Compacts a set of cells
 	{
-		auto func = ScalarFunction("a5_compact", {LogicalType::LIST(LogicalType::UBIGINT)},
+		auto func = ScalarFunction("a5_compact", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5CompactFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1166,7 +1180,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_uncompact: Uncompacts cells to the resolution of the set
 	{
-		auto func = ScalarFunction("a5_uncompact", {LogicalType::LIST(LogicalType::UBIGINT)},
+		auto func = ScalarFunction("a5_uncompact", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5UncompactFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1184,7 +1198,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_hex_to_u64: Converts a hex string to a u64 cell ID
 	{
-		auto func = ScalarFunction("a5_hex_to_u64", {LogicalType::VARCHAR}, LogicalType::UBIGINT, A5HexToU64Fun);
+		auto func = ScalarFunction("a5_hex_to_u64", {Positional("hex", LogicalType::VARCHAR)}, LogicalType::UBIGINT,
+		                           A5HexToU64Fun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1199,7 +1214,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_u64_to_hex: Converts a u64 cell ID to a hex string
 	{
-		auto func = ScalarFunction("a5_u64_to_hex", {LogicalType::UBIGINT}, LogicalType::VARCHAR, A5U64ToHexFun);
+		auto func = ScalarFunction("a5_u64_to_hex", {Positional("cell", LogicalType::UBIGINT)}, LogicalType::VARCHAR,
+		                           A5U64ToHexFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Converts a UBIGINT A5 cell ID to its hex string representation";
@@ -1213,7 +1229,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_get_num_children: Returns the number of children between two resolutions
 	{
-		auto func = ScalarFunction("a5_get_num_children", {LogicalType::INTEGER, LogicalType::INTEGER},
+		auto func = ScalarFunction("a5_get_num_children",
+		                           {Positional("parent_resolution", LogicalType::INTEGER),
+		                            Positional("child_resolution", LogicalType::INTEGER)},
 		                           LogicalType::UBIGINT, A5GetNumChildrenFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1231,8 +1249,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_spherical_cap: Returns cells within a spherical cap radius
 	{
-		auto func = ScalarFunction("a5_spherical_cap", {LogicalType::UBIGINT, LogicalType::DOUBLE},
-		                           LogicalType::LIST(LogicalType::UBIGINT), A5SphericalCapFun);
+		auto func = ScalarFunction(
+		    "a5_spherical_cap", {Positional("cell", LogicalType::UBIGINT), Positional("radius", LogicalType::DOUBLE)},
+		    LogicalType::LIST(LogicalType::UBIGINT), A5SphericalCapFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1249,7 +1268,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_grid_disk: Returns cells within k edge-distance of the given cell
 	{
-		auto func = ScalarFunction("a5_grid_disk", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		auto func = ScalarFunction("a5_grid_disk",
+		                           {Positional("cell", LogicalType::UBIGINT), Positional("k", LogicalType::INTEGER)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1267,7 +1287,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_grid_disk_vertex: Returns cells within k vertex-distance of the given cell
 	{
-		auto func = ScalarFunction("a5_grid_disk_vertex", {LogicalType::UBIGINT, LogicalType::INTEGER},
+		auto func = ScalarFunction("a5_grid_disk_vertex",
+		                           {Positional("cell", LogicalType::UBIGINT), Positional("k", LogicalType::INTEGER)},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5GridDiskVertexFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1314,7 +1335,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_is_valid_cell: Returns whether a value is a valid A5 cell ID
 	{
-		auto func = ScalarFunction("a5_is_valid_cell", {LogicalType::UBIGINT}, LogicalType::BOOLEAN, A5IsValidCellFun);
+		auto func = ScalarFunction("a5_is_valid_cell", {Positional("cell", LogicalType::UBIGINT)}, LogicalType::BOOLEAN,
+		                           A5IsValidCellFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns true if the value is a valid A5 cell ID (a canonically-encoded cell). The world "
@@ -1329,8 +1351,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_is_compaction_marker: Returns whether a value is a compaction marker
 	{
-		auto func = ScalarFunction("a5_is_compaction_marker", {LogicalType::UBIGINT}, LogicalType::BOOLEAN,
-		                           A5IsCompactionMarkerFun);
+		auto func = ScalarFunction("a5_is_compaction_marker", {Positional("value", LogicalType::UBIGINT)},
+		                           LogicalType::BOOLEAN, A5IsCompactionMarkerFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns true if the value is a compaction marker: the last element of a covering (as "
@@ -1348,8 +1370,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_covering_resolution: Returns the resolution of a set of cells
 	{
-		auto func = ScalarFunction("a5_covering_resolution", {LogicalType::LIST(LogicalType::UBIGINT)},
-		                           LogicalType::INTEGER, A5CoveringResolutionFun);
+		auto func =
+		    ScalarFunction("a5_covering_resolution", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
+			               LogicalType::INTEGER, A5CoveringResolutionFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the resolution of a list of A5 cells: the resolution of its compaction marker, or "
@@ -1364,8 +1387,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_count: Returns the number of cells in a set at its resolution
 	{
-		auto func =
-		    ScalarFunction("a5_count", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::UBIGINT, A5CountFun);
+		auto func = ScalarFunction("a5_count", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
+		                           LogicalType::UBIGINT, A5CountFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1382,8 +1405,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_area: Returns the area of a set of cells
 	{
-		auto func =
-		    ScalarFunction("a5_area", {LogicalType::LIST(LogicalType::UBIGINT)}, LogicalType::DOUBLE, A5AreaFun);
+		auto func = ScalarFunction("a5_area", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
+		                           LogicalType::DOUBLE, A5AreaFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1399,8 +1422,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_contains: Returns whether a cell is in a set of cells
 	{
-		auto func = ScalarFunction("a5_contains", {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::UBIGINT},
-		                           LogicalType::BOOLEAN, A5ContainsFun);
+		auto func = ScalarFunction(
+		    "a5_contains",
+		    {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT)), Positional("cell", LogicalType::UBIGINT)},
+		    LogicalType::BOOLEAN, A5ContainsFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1419,7 +1444,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_overlaps: Returns whether two sets of cells share any cell
 	{
 		auto func = ScalarFunction("a5_overlaps",
-		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           {Positional("a", LogicalType::LIST(LogicalType::UBIGINT)),
+		                            Positional("b", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::BOOLEAN, A5OverlapsFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1438,7 +1464,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_union: Returns the union of two sets of cells
 	{
 		auto func = ScalarFunction("a5_union",
-		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           {Positional("a", LogicalType::LIST(LogicalType::UBIGINT)),
+		                            Positional("b", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5UnionFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1458,7 +1485,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_intersect: Returns the intersect of two sets of cells
 	{
 		auto func = ScalarFunction("a5_intersect",
-		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           {Positional("a", LogicalType::LIST(LogicalType::UBIGINT)),
+		                            Positional("b", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5IntersectFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1478,7 +1506,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_difference: Returns the difference of two sets of cells
 	{
 		auto func = ScalarFunction("a5_difference",
-		                           {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::LIST(LogicalType::UBIGINT)},
+		                           {Positional("a", LogicalType::LIST(LogicalType::UBIGINT)),
+		                            Positional("b", LogicalType::LIST(LogicalType::UBIGINT))},
 		                           LogicalType::LIST(LogicalType::UBIGINT), A5DifferenceFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
@@ -1498,8 +1527,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_supercell: Returns the coarser cell containing the center of a cell
 	{
-		auto func = ScalarFunction("a5_cell_to_supercell", {LogicalType::UBIGINT, LogicalType::INTEGER},
-		                           LogicalType::UBIGINT, A5CellToSupercellFun);
+		auto func =
+		    ScalarFunction("a5_cell_to_supercell",
+			               {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
+			               LogicalType::UBIGINT, A5CellToSupercellFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1516,8 +1547,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_subcells: Returns the finer cells whose centers lie in a cell
 	{
-		auto func = ScalarFunction("a5_cell_to_subcells", {LogicalType::UBIGINT, LogicalType::INTEGER},
-		                           LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellsFun);
+		auto func =
+		    ScalarFunction("a5_cell_to_subcells",
+			               {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
+			               LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellsFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1535,7 +1568,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_migrate: Migrates a cell ID from the a5 0.x index to the a5 1.0 index
 	{
-		auto func = ScalarFunction("a5_migrate", {LogicalType::UBIGINT}, LogicalType::UBIGINT, A5MigrateFun);
+		auto func = ScalarFunction("a5_migrate", {Positional("cell", LogicalType::UBIGINT)}, LogicalType::UBIGINT,
+		                           A5MigrateFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1553,10 +1587,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_geometry_to_cells: Returns the cells covering any geometry
 	{
 		ScalarFunctionSet func_set("a5_geometry_to_cells");
-		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER},
-		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
-		func_set.AddFunction(ScalarFunction({LogicalType::GEOMETRY(), LogicalType::INTEGER, LogicalType::BOOLEAN},
-		                                    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		func_set.AddFunction(ScalarFunction(
+		    {Positional("geom", LogicalType::GEOMETRY()), Positional("resolution", LogicalType::INTEGER)},
+		    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		func_set.AddFunction(
+		    ScalarFunction({Positional("geom", LogicalType::GEOMETRY()), Positional("resolution", LogicalType::INTEGER),
+			                Positional("overlapping", LogicalType::BOOLEAN)},
+			               LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1590,9 +1627,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	// a5_cell_to_geometry: Returns the cell pentagon as a POLYGON geometry
 	{
 		ScalarFunctionSet func_set("a5_cell_to_geometry");
-		func_set.AddFunction(ScalarFunction({LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
 		func_set.AddFunction(
-		    ScalarFunction({LogicalType::UBIGINT, LogicalType::INTEGER}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		    ScalarFunction({Positional("cell", LogicalType::UBIGINT)}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		func_set.AddFunction(
+		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("segments", LogicalType::INTEGER)},
+			               LogicalType::GEOMETRY(), A5CellToGeometryFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1618,8 +1657,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// a5_cell_to_point: Returns the cell center as a POINT geometry
 	{
-		auto func =
-		    ScalarFunction("a5_cell_to_point", {LogicalType::UBIGINT}, LogicalType::GEOMETRY(), A5CellToPointFun);
+		auto func = ScalarFunction("a5_cell_to_point", {Positional("cell", LogicalType::UBIGINT)},
+		                           LogicalType::GEOMETRY(), A5CellToPointFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
