@@ -1,0 +1,140 @@
+# name: test/sql/a5_cover.test
+# description: a5_cover_ranges, a5_in_cover and a5_covering_grid_disk_vertex
+# group: [sql]
+
+require a5
+
+require parquet
+
+# A resolution 2-29 cell covers the IDs [id - tag, id + tag - 1], tag being its lowest set bit
+
+query I
+WITH c AS (SELECT a5_lonlat_to_cell(-73.98, 40.75, 10) AS id)
+SELECT a5_cover_ranges([id]) = [{'lo': id - (id & -id::HUGEINT)::UBIGINT, 'hi': id + (id & -id::HUGEINT)::UBIGINT - 1}] FROM c;
+----
+true
+
+# Ranges merge: a cell's children cover the same single range as the cell
+
+query I
+WITH c AS (SELECT a5_lonlat_to_cell(-73.98, 40.75, 10) AS id)
+SELECT a5_cover_ranges(a5_cell_to_children(id, 12)) = a5_cover_ranges([id]) FROM c;
+----
+true
+
+# Compacted and uncompacted coverings give the same ranges, in any order
+
+query II
+WITH c AS (SELECT a5_grid_disk(a5_lonlat_to_cell(-73.98, 40.75, 10), 2) AS cells)
+SELECT a5_cover_ranges(a5_compact(cells)) = a5_cover_ranges(cells),
+       a5_cover_ranges(list_reverse(cells)) = a5_cover_ranges(cells) FROM c;
+----
+true	true
+
+query I
+SELECT a5_cover_ranges([]::UBIGINT[]);
+----
+[]
+
+query I
+SELECT a5_cover_ranges(NULL);
+----
+NULL
+
+statement error
+SELECT a5_cover_ranges([288230376151711744::UBIGINT]);
+----
+a5_cover_ranges: Invalid cell
+
+# a5_in_cover agrees with a5_contains on the parent at the covering's resolution
+
+statement ok
+CREATE TABLE pts AS
+SELECT a5_lonlat_to_cell(-74.2 + x * 0.004, 40.55 + y * 0.004, 24) AS cell
+FROM range(100) t1(x), range(100) t2(y);
+
+statement ok
+CREATE TABLE covers AS
+SELECT r, a5_covering_grid_disk_vertex(a5_geometry_to_cells(
+    'POLYGON((-74.0 40.6, -73.8 40.6, -73.8 40.8, -74.0 40.8, -74.0 40.6))'::GEOMETRY, r, true), 1) AS cells
+FROM (VALUES (8), (11), (14)) t(r);
+
+query II
+SELECT r, count(*) FILTER (WHERE a5_in_cover(cells, cell) <>
+    a5_contains(a5_uncompact(cells), a5_cell_to_parent(cell, a5_covering_resolution(cells))))
+FROM pts, covers GROUP BY r ORDER BY r;
+----
+8	0
+11	0
+14	0
+
+query II
+SELECT a5_in_cover([a5_lonlat_to_cell(-73.98, 40.75, 10)], a5_lonlat_to_cell(-73.98, 40.75, 24)),
+       a5_in_cover([a5_lonlat_to_cell(-73.98, 40.75, 10)], a5_lonlat_to_cell(-70.0, 40.75, 24));
+----
+true	false
+
+query II
+SELECT a5_in_cover(NULL, a5_lonlat_to_cell(-73.98, 40.75, 24)), a5_in_cover([a5_lonlat_to_cell(-73.98, 40.75, 10)], NULL);
+----
+NULL	NULL
+
+# NULL rather than an error for cells it cannot answer for, so it is not marked fallible and
+# DuckDB can push it into scans next to other filters
+
+query III
+SELECT a5_in_cover([a5_lonlat_to_cell(-73.98, 40.75, 10)], a5_lonlat_to_cell(-73.98, 40.75, 8)),
+       a5_in_cover([a5_lonlat_to_cell(-73.98, 40.75, 10)], a5_lonlat_to_cell(0, 0, 0)),
+       a5_in_cover([288230376151711744::UBIGINT], a5_lonlat_to_cell(-73.98, 40.75, 24));
+----
+NULL	NULL	NULL
+
+# Row-group pruning must never drop a matching row: count through a Parquet file with small row groups
+
+statement ok
+COPY (SELECT cell FROM pts ORDER BY cell) TO '{TEST_DIR}/a5_cover.parquet' (FORMAT parquet, ROW_GROUP_SIZE 500);
+
+query II
+SELECT r, (SELECT count(*) FROM '{TEST_DIR}/a5_cover.parquet' p WHERE a5_in_cover(c.cells, p.cell))
+       = (SELECT count(*) FROM pts WHERE a5_in_cover(c.cells, pts.cell))
+FROM covers c ORDER BY r;
+----
+8	true
+11	true
+14	true
+
+query I
+SELECT count(*) = (SELECT count(*) FROM pts WHERE a5_in_cover(a5_covering_grid_disk_vertex(a5_geometry_to_cells(
+    'POLYGON((-74.0 40.6, -73.9 40.6, -73.9 40.7, -74.0 40.7, -74.0 40.6))'::GEOMETRY, 12, true), 1), cell))
+FROM '{TEST_DIR}/a5_cover.parquet'
+WHERE a5_in_cover(a5_covering_grid_disk_vertex(a5_geometry_to_cells(
+    'POLYGON((-74.0 40.6, -73.9 40.6, -73.9 40.7, -74.0 40.7, -74.0 40.6))'::GEOMETRY, 12, true), 1), cell);
+----
+true
+
+# Pruning still applies, and stays correct, next to a filter DuckDB cannot turn into a range
+
+query I
+SELECT count(*) = (SELECT count(*) FROM pts WHERE a5_in_cover(a5_covering_grid_disk_vertex(a5_geometry_to_cells(
+    'POLYGON((-74.0 40.6, -73.9 40.6, -73.9 40.7, -74.0 40.7, -74.0 40.6))'::GEOMETRY, 12, true), 1), cell)
+    AND a5_cell_to_lonlat(cell)[1] + 0 < -73.95)
+FROM '{TEST_DIR}/a5_cover.parquet'
+WHERE a5_in_cover(a5_covering_grid_disk_vertex(a5_geometry_to_cells(
+    'POLYGON((-74.0 40.6, -73.9 40.6, -73.9 40.7, -74.0 40.7, -74.0 40.6))'::GEOMETRY, 12, true), 1), cell)
+    AND a5_cell_to_lonlat(cell)[1] + 0 < -73.95;
+----
+true
+
+# a5_covering_grid_disk_vertex: k = 0 compacts, k = 1 adds a ring
+
+query II
+WITH c AS (SELECT a5_lonlat_to_cell(-73.98, 40.75, 10) AS id)
+SELECT a5_covering_grid_disk_vertex([id], 0) = a5_compact([id]),
+       a5_uncompact(a5_covering_grid_disk_vertex([id], 1)) = a5_uncompact(a5_grid_disk_vertex(id, 1)) FROM c;
+----
+true	true
+
+statement error
+SELECT a5_covering_grid_disk_vertex([a5_lonlat_to_cell(-73.98, 40.75, 10)], -1);
+----
+a5_covering_grid_disk_vertex: k must be >= 0

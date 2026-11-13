@@ -459,3 +459,27 @@ pub extern "C" fn a5_cell_to_subcells(cell: u64, resolution: i32) -> CellArray {
 pub extern "C" fn a5_migrate(cell: u64) -> ResultU64 {
     u64_result_to_c(guard(|| a5::migrate(cell)))
 }
+
+// The leaf-slot ranges a set of cells covers, as a flat array of half-open
+// [lo, hi) pairs, sorted and merged. For cells at resolutions 1-29 a cell ID lies
+// inside its own range, so an ID column sorted in curve order can be tested
+// against these ranges directly.
+#[no_mangle]
+pub extern "C" fn a5_cells_to_ranges(cells: *const u64, len: usize) -> CellArray {
+    cell_vec_result_to_c(guard(|| a5::coverings::slot_runs::to_slot_runs(cells_to_slice(cells, len))))
+}
+
+// Grow a set of cells by k vertex rings at its resolution, then compact it.
+#[no_mangle]
+pub extern "C" fn a5_covering_grid_disk_vertex(cells: *const u64, len: usize, k: usize) -> CellArray {
+    cell_vec_result_to_c(guard(|| {
+        let mut grown = Vec::new();
+        for cell in a5::uncompact(cells_to_slice(cells, len))? {
+            // grid_disk_vertex returns a covering: drop its compaction marker
+            grown.extend(a5::grid_disk_vertex(cell, k)?.into_iter().filter(|&c| !a5::is_compaction_marker(c)));
+        }
+        grown.sort_unstable();
+        grown.dedup();
+        a5::compact(&grown)
+    }))
+}

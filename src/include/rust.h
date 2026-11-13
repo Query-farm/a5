@@ -136,4 +136,8 @@ CellArray a5_cell_to_subcells(uint64_t cell, int32_t resolution);
 
 ResultU64 a5_migrate(uint64_t cell);
 
+CellArray a5_cells_to_ranges(const uint64_t *cells, uintptr_t len);
+
+CellArray a5_covering_grid_disk_vertex(const uint64_t *cells, uintptr_t len, uintptr_t k);
+
 }  // extern "C"

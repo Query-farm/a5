@@ -11,12 +11,16 @@
 #include "duckdb/common/vector/list_vector.hpp"
 #include "duckdb/common/vector/string_vector.hpp"
 #include "duckdb/common/vector/unified_vector_format.hpp"
+#include "duckdb/common/enums/filter_propagate_result.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
+#include "duckdb/storage/statistics/numeric_stats.hpp"
 #include "rust.h"
 #include "query_farm_telemetry.hpp"
 #include <unordered_set>
 namespace duckdb {
 
-#define A5_EXTENSION_VERSION "2026102101"
+#define A5_EXTENSION_VERSION "2026111301"
 
 // The finest A5 resolution, as defined by the a5 crate.
 static const int32_t MAX_RESOLUTION = a5_max_resolution();
@@ -931,6 +935,294 @@ static FunctionParameter Positional(const char *name, LogicalType type) {
 	return FunctionParameter(name, std::move(type), {}, FunctionParameterKind::POSITIONAL_ONLY);
 }
 
+// ---------------------------------------------------------------------------
+// ID ranges of a covering
+//
+// Every A5 cell covers a contiguous block of leaf slots, and for resolutions 1-29 a
+// cell ID lies inside its own block. So the cells a covering stands for, at any
+// resolution 1-29 at least as fine as the covering, are exactly the IDs inside the
+// covering's merged slot ranges. That makes "is this cell in the covering" a range
+// test on the raw ID, which DuckDB can also check against a row group's min/max.
+// ---------------------------------------------------------------------------
+
+// Merged, half-open [lo, hi) ranges of a covering plus the resolution of its finest cell.
+struct CoverRanges {
+	vector<uint64_t> bounds; // lo0, hi0, lo1, hi1, ...
+	int32_t finest_resolution = -1;
+
+	idx_t Count() const {
+		return bounds.size() / 2;
+	}
+
+	// Index of the first range whose (exclusive) end is above value, or Count() if none.
+	idx_t FirstEndingAbove(uint64_t value) const {
+		idx_t lo = 0, hi = Count();
+		while (lo < hi) {
+			auto mid = lo + (hi - lo) / 2;
+			if (bounds[2 * mid + 1] > value) {
+				hi = mid;
+			} else {
+				lo = mid + 1;
+			}
+		}
+		return lo;
+	}
+
+	bool Contains(uint64_t value) const {
+		auto i = FirstEndingAbove(value);
+		return i < Count() && bounds[2 * i] <= value;
+	}
+
+	// Whether any range meets the closed interval [min, max].
+	bool Overlaps(uint64_t min, uint64_t max) const {
+		auto i = FirstEndingAbove(min);
+		return i < Count() && bounds[2 * i] <= max;
+	}
+};
+
+static CoverRanges ComputeCoverRanges(const uint64_t *cells, idx_t len, const char *function_name) {
+	CoverRanges result;
+	for (idx_t i = 0; i < len; i++) {
+		if (a5_is_compaction_marker(cells[i])) {
+			continue;
+		}
+		result.finest_resolution = MaxValue(result.finest_resolution, a5_get_resolution(cells[i]));
+	}
+	auto ranges = a5_cells_to_ranges(cells, len);
+	ThrowCellArrayError(ranges, function_name);
+	result.bounds.assign(ranges.data, ranges.data + ranges.len);
+	a5_free_cell_array(ranges);
+	return result;
+}
+
+static CoverRanges CoverRangesFromValue(const Value &cells, const char *function_name) {
+	vector<uint64_t> ids;
+	for (auto &child : ListValue::GetChildren(cells)) {
+		if (!child.IsNull()) {
+			ids.push_back(child.GetValue<uint64_t>());
+		}
+	}
+	return ComputeCoverRanges(ids.data(), ids.size(), function_name);
+}
+
+inline void A5CoverRangesFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+	UnaryExecutor::Execute<list_entry_t, list_entry_t>(args.data[0], result, [&](list_entry_t cells) {
+		auto ranges = ComputeCoverRanges(cell_list_data + cells.offset, cells.length, "a5_cover_ranges");
+		for (idx_t i = 0; i < ranges.Count(); i++) {
+			// Report closed ranges so they drop straight into BETWEEN
+			ListVector::PushBack(result, Value::STRUCT({{"lo", Value::UBIGINT(ranges.bounds[2 * i])},
+			                                            {"hi", Value::UBIGINT(ranges.bounds[2 * i + 1] - 1)}}));
+		}
+		list_entry_t out(offset, ranges.Count());
+		offset += ranges.Count();
+		return out;
+	});
+}
+
+// The resolution of a cell ID for resolutions 1-29; -1 otherwise. Resolution 1 is tagged by
+// bit 56 and resolutions 2-29 by the odd bits 55 down to 1, read from the lowest set bit.
+// Resolution 30 IDs also use the lowest bits, so for those ask the crate.
+static inline int32_t CurveResolution(uint64_t cell) {
+	if (cell == 0) {
+		return -1;
+	}
+	auto bit = CountZeros<uint64_t>::Trailing(cell);
+	if (bit < 6) {
+		auto resolution = a5_get_resolution(cell);
+		return resolution >= 1 && resolution <= MAX_RESOLUTION - 1 ? resolution : -1;
+	}
+	if (bit == 56) {
+		return 1;
+	}
+	if (bit % 2 == 1 && bit <= 55) {
+		return static_cast<int32_t>((59 - bit) / 2);
+	}
+	return -1;
+}
+
+// Whether a5_in_cover can answer for this cell: a resolution 1-29 cell, at or finer than the covering.
+// a5_in_cover returns NULL otherwise instead of raising an error, so DuckDB may push it into scans
+// alongside other filters (it only pushes filters that can throw when they stand alone).
+static inline bool InCoverResolutionOk(uint64_t cell, const CoverRanges &ranges) {
+	auto resolution = CurveResolution(cell);
+	return resolution >= 0 && resolution >= ranges.finest_resolution;
+}
+
+// The ranges of the last constant covering seen, shared by row-group pruning, every thread
+// executing the function and every copy of the bind data, so a query computes them once.
+// List values share their children by reference, so the children's address identifies a
+// covering cheaply; holding a copy of the value keeps that address from being reused.
+struct A5InCoverCache {
+	mutex lock;
+	Value cells;
+	const void *key = nullptr;
+	shared_ptr<const CoverRanges> ranges;
+};
+
+struct A5InCoverBindData : public FunctionData {
+	A5InCoverBindData() : cache(make_shared_ptr<A5InCoverCache>()) {
+	}
+	explicit A5InCoverBindData(shared_ptr<A5InCoverCache> cache_p) : cache(std::move(cache_p)) {
+	}
+
+	shared_ptr<const CoverRanges> Get(const Value &cells) const {
+		const void *key = &ListValue::GetChildren(cells);
+		lock_guard<mutex> guard(cache->lock);
+		if (!cache->ranges || cache->key != key) {
+			cache->ranges = make_shared_ptr<const CoverRanges>(CoverRangesFromValue(cells, "a5_in_cover"));
+			cache->cells = cells;
+			cache->key = &ListValue::GetChildren(cache->cells);
+		}
+		return cache->ranges;
+	}
+
+	unique_ptr<FunctionData> Copy() const override {
+		return make_uniq<A5InCoverBindData>(cache);
+	}
+	bool Equals(const FunctionData &other) const override {
+		return true;
+	}
+
+private:
+	shared_ptr<A5InCoverCache> cache;
+};
+
+static unique_ptr<FunctionData> A5InCoverBind(BindScalarFunctionInput &input) {
+	return make_uniq<A5InCoverBindData>();
+}
+
+struct A5InCoverLocalState : public FunctionLocalState {
+	//! Whether the covering is a constant (its ranges are then computed once per query)
+	bool constant = false;
+	//! The constant covering's ranges; null when it is NULL or not a valid covering
+	shared_ptr<const CoverRanges> ranges;
+};
+
+static unique_ptr<FunctionLocalState>
+A5InCoverInitLocalState(ExpressionState &state, const BoundFunctionExpression &expr, FunctionData *bind_data) {
+	auto result = make_uniq<A5InCoverLocalState>();
+	auto &cells = *expr.GetChildren()[0];
+	if (bind_data && cells.GetExpressionType() == ExpressionType::VALUE_CONSTANT) {
+		result->constant = true;
+		auto &value = cells.Cast<BoundConstantExpression>().GetValue();
+		if (!value.IsNull()) {
+			try {
+				result->ranges = bind_data->Cast<A5InCoverBindData>().Get(value);
+			} catch (std::exception &) {
+				// Not a valid covering: every result is NULL
+			}
+		}
+	}
+	return std::move(result);
+}
+
+inline void A5InCoverFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &cells_vector = args.data[0];
+	auto &cell_vector = args.data[1];
+	auto count = args.size();
+
+	UnifiedVectorFormat cell_format;
+	cell_vector.ToUnifiedFormat(cell_format);
+	auto cell_data = UnifiedVectorFormat::GetData<uint64_t>(cell_format);
+	auto result_data = FlatVector::GetDataMutable<bool>(result);
+
+	auto local_state = ExecuteFunctionState::GetFunctionState(state);
+	if (local_state && local_state->Cast<A5InCoverLocalState>().constant) {
+		// The usual case, a constant covering: its ranges were computed once per query
+		auto ranges = local_state->Cast<A5InCoverLocalState>().ranges;
+		for (idx_t i = 0; i < count; i++) {
+			auto idx = cell_format.sel->get_index(i);
+			if (!ranges || !cell_format.validity.RowIsValid(idx) || !InCoverResolutionOk(cell_data[idx], *ranges)) {
+				FlatVector::SetNull(result, i, true);
+				continue;
+			}
+			result_data[i] = ranges->Contains(cell_data[idx]);
+		}
+	} else {
+		UnifiedVectorFormat cells_format;
+		cells_vector.ToUnifiedFormat(cells_format);
+		auto cells_entries = UnifiedVectorFormat::GetData<list_entry_t>(cells_format);
+		auto cell_list_data = CellListData(cells_vector);
+		for (idx_t i = 0; i < count; i++) {
+			auto idx = cell_format.sel->get_index(i);
+			auto cells_idx = cells_format.sel->get_index(i);
+			if (!cell_format.validity.RowIsValid(idx) || !cells_format.validity.RowIsValid(cells_idx)) {
+				FlatVector::SetNull(result, i, true);
+				continue;
+			}
+			auto &entry = cells_entries[cells_idx];
+			CoverRanges ranges;
+			try {
+				ranges = ComputeCoverRanges(cell_list_data + entry.offset, entry.length, "a5_in_cover");
+			} catch (std::exception &) {
+				FlatVector::SetNull(result, i, true);
+				continue;
+			}
+			if (!InCoverResolutionOk(cell_data[idx], ranges)) {
+				FlatVector::SetNull(result, i, true);
+				continue;
+			}
+			result_data[i] = ranges.Contains(cell_data[idx]);
+		}
+	}
+	if (count == 1) {
+		result.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+}
+
+// Row-group pruning for a5_in_cover(<constant covering>, column): skip the group when
+// none of the covering's ID ranges meets the column's [min, max].
+static FilterPropagateResult A5InCoverFilterPrune(const FunctionStatisticsPruneInput &input) {
+	auto &children = input.function.GetChildren();
+	if (children.size() != 2 || children[0]->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
+	}
+	auto column_stats = input.ChildStats(1);
+	if (!column_stats || !NumericStats::HasMinMax(*column_stats)) {
+		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
+	}
+	auto &cells = children[0]->Cast<BoundConstantExpression>().GetValue();
+	if (cells.IsNull()) {
+		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
+	}
+	shared_ptr<const CoverRanges> ranges;
+	try {
+		if (input.bind_data) {
+			ranges = input.bind_data->Cast<A5InCoverBindData>().Get(cells);
+		} else {
+			ranges = make_shared_ptr<const CoverRanges>(CoverRangesFromValue(cells, "a5_in_cover"));
+		}
+	} catch (std::exception &) {
+		// Leave the error to execution
+		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
+	}
+	auto min = NumericStats::GetMin<uint64_t>(*column_stats);
+	auto max = NumericStats::GetMax<uint64_t>(*column_stats);
+	if (ranges->Overlaps(min, max)) {
+		return FilterPropagateResult::NO_PRUNING_POSSIBLE;
+	}
+	// No row can be true; rows at an unsupported resolution are NULL
+	return FilterPropagateResult::FILTER_FALSE_OR_NULL;
+}
+
+inline void A5CoveringGridDiskVertexFun(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto cell_list_data = CellListData(args.data[0]);
+	ListVector::Reserve(result, args.size() * 4);
+	uint64_t offset = 0;
+	BinaryExecutor::Execute<list_entry_t, int32_t, list_entry_t>(
+	    args.data[0], args.data[1], result, [&](list_entry_t cells, int32_t k) {
+		    if (k < 0) {
+			    throw InvalidInputException("a5_covering_grid_disk_vertex: k must be >= 0");
+		    }
+		    auto grown =
+		        a5_covering_grid_disk_vertex(cell_list_data + cells.offset, cells.length, static_cast<uintptr_t>(k));
+		    return PushCellArray(result, offset, grown, "a5_covering_grid_disk_vertex");
+	    });
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	// DuckDB requires every scalar function that can raise an error (an out-of-range resolution, an
 	// invalid cell, ...) to be marked with SetFallible(); the few that never throw are left unmarked.
@@ -1004,9 +1296,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_lonlat_to_cell",
-			               {Positional("longitude", LogicalType::DOUBLE), Positional("latitude", LogicalType::DOUBLE),
-			                Positional("resolution", LogicalType::INTEGER)},
-			               LogicalType::UBIGINT, A5LonLatToCellFun);
+		                   {Positional("longitude", LogicalType::DOUBLE), Positional("latitude", LogicalType::DOUBLE),
+		                    Positional("resolution", LogicalType::INTEGER)},
+		                   LogicalType::UBIGINT, A5LonLatToCellFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1121,11 +1413,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 		                                    A5CellToBoundaryFun));
 		func_set.AddFunction(
 		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("closed_ring", LogicalType::BOOLEAN)},
-			               LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
+		                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
 		func_set.AddFunction(
 		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("closed_ring", LogicalType::BOOLEAN),
-			                Positional("segments", LogicalType::INTEGER)},
-			               LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
+		                    Positional("segments", LogicalType::INTEGER)},
+		                   LogicalType::LIST(LogicalType::ARRAY(LogicalType::DOUBLE, 2)), A5CellToBoundaryFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1157,6 +1449,74 @@ static void LoadInternal(ExtensionLoader &loader) {
 		desc3.categories = {"a5", "geospatial"};
 		info.descriptions.push_back(std::move(desc3));
 
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_cover_ranges: The ID ranges a covering stands for
+	{
+		auto range_type = LogicalType::STRUCT({{"lo", LogicalType::UBIGINT}, {"hi", LogicalType::UBIGINT}});
+		auto func = ScalarFunction("a5_cover_ranges", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
+		                           LogicalType::LIST(range_type), A5CoverRangesFun);
+		func.SetFallible();
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description =
+		    "Returns the cell ID ranges a list of A5 cells (compacted or not) stands for, as sorted, merged, closed "
+		    "[lo, hi] ranges. A cell at resolution 1 to 29, at or finer than the list's cells, is a descendant of a "
+		    "cell in the list exactly when its ID lies in one of the ranges, so a column of cell IDs can be filtered "
+		    "with BETWEEN";
+		desc.parameter_names = {"cells"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT)};
+		desc.examples = {"a5_cover_ranges(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_in_cover: Whether a cell descends from a cell of a covering, with row-group pruning
+	{
+		auto func = ScalarFunction(
+		    "a5_in_cover",
+		    {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT)), Positional("cell", LogicalType::UBIGINT)},
+		    LogicalType::BOOLEAN, A5InCoverFun);
+		func.SetFilterPruneCallback(A5InCoverFilterPrune);
+		func.SetBindCallback(A5InCoverBind);
+		func.SetInitStateCallback(A5InCoverInitLocalState);
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description =
+		    "Returns true if the cell is, or descends from, a cell in the list of A5 cells (compacted or not, in any "
+		    "order). Returns NULL when the cell is not at a resolution from 1 to 29 at or finer than the list's "
+		    "cells, or the list is not a valid set of cells. With a "
+		    "constant list, DuckDB skips row groups whose cell ID range meets none of the list's cells. Cells nest "
+		    "by ID, not by area: grow a covering with a5_covering_grid_disk_vertex before testing points against it";
+		desc.parameter_names = {"cells", "cell"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::UBIGINT};
+		desc.examples = {"a5_in_cover(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), "
+		                 "a5_lonlat_to_cell(-122.41, 37.79, 20))"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
+		loader.RegisterFunction(std::move(info));
+	}
+
+	// a5_covering_grid_disk_vertex: Grow a covering by k vertex rings
+	{
+		auto func = ScalarFunction(
+		    "a5_covering_grid_disk_vertex",
+		    {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT)), Positional("k", LogicalType::INTEGER)},
+		    LogicalType::LIST(LogicalType::UBIGINT), A5CoveringGridDiskVertexFun);
+		func.SetFallible();
+		CreateScalarFunctionInfo info(func);
+		FunctionDescription desc;
+		desc.description =
+		    "Grows a list of A5 cells (compacted or not) by k vertex rings of cells at its resolution, and returns "
+		    "the result compacted. A cell's ancestor by ID can lie next to the coarser cell that holds it by area, so "
+		    "grow an area covering by one ring before testing finer cell IDs against it";
+		desc.parameter_names = {"cells", "k"};
+		desc.parameter_types = {LogicalType::LIST(LogicalType::UBIGINT), LogicalType::INTEGER};
+		desc.examples = {"a5_covering_grid_disk_vertex(a5_grid_disk(a5_lonlat_to_cell(-122.4, 37.8, 10), 2), 1)"};
+		desc.categories = {"a5", "geospatial"};
+		info.descriptions.push_back(std::move(desc));
 		loader.RegisterFunction(std::move(info));
 	}
 
@@ -1372,7 +1732,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_covering_resolution", {Positional("cells", LogicalType::LIST(LogicalType::UBIGINT))},
-			               LogicalType::INTEGER, A5CoveringResolutionFun);
+		                   LogicalType::INTEGER, A5CoveringResolutionFun);
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
 		desc.description = "Returns the resolution of a list of A5 cells: the resolution of its compaction marker, or "
@@ -1529,8 +1889,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_cell_to_supercell",
-			               {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
-			               LogicalType::UBIGINT, A5CellToSupercellFun);
+		                   {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
+		                   LogicalType::UBIGINT, A5CellToSupercellFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1549,8 +1909,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	{
 		auto func =
 		    ScalarFunction("a5_cell_to_subcells",
-			               {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
-			               LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellsFun);
+		                   {Positional("cell", LogicalType::UBIGINT), Positional("resolution", LogicalType::INTEGER)},
+		                   LogicalType::LIST(LogicalType::UBIGINT), A5CellToSubcellsFun);
 		func.SetFallible();
 		CreateScalarFunctionInfo info(func);
 		FunctionDescription desc;
@@ -1592,8 +1952,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
 		func_set.AddFunction(
 		    ScalarFunction({Positional("geom", LogicalType::GEOMETRY()), Positional("resolution", LogicalType::INTEGER),
-			                Positional("overlapping", LogicalType::BOOLEAN)},
-			               LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
+		                    Positional("overlapping", LogicalType::BOOLEAN)},
+		                   LogicalType::LIST(LogicalType::UBIGINT), A5GeometryToCellsFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
@@ -1631,7 +1991,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 		    ScalarFunction({Positional("cell", LogicalType::UBIGINT)}, LogicalType::GEOMETRY(), A5CellToGeometryFun));
 		func_set.AddFunction(
 		    ScalarFunction({Positional("cell", LogicalType::UBIGINT), Positional("segments", LogicalType::INTEGER)},
-			               LogicalType::GEOMETRY(), A5CellToGeometryFun));
+		                   LogicalType::GEOMETRY(), A5CellToGeometryFun));
 		func_set.SetFallible();
 		CreateScalarFunctionInfo info(func_set);
 
